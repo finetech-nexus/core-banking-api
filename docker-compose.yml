@@ -1,0 +1,56 @@
+version: "3.9"
+
+services:
+
+  mysql:
+    image: mysql:latest
+    command: --default-authentication-plugin=mysql_native_password
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: node_auth_app
+      MYSQL_USER: app
+      MYSQL_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - 3306:3306
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - $HOME/database:/var/lib/mysql
+
+  keycloak:
+    image: quay.io/keycloak/keycloak
+
+    environment:
+        DB_VENDOR: MYSQL
+        DB_ADDR: mysql
+        DB_DATABASE: node_auth_app
+        DB_USER: app
+        DB_PASSWORD: password
+        KEYCLOAK_ADMIN: admin
+        KEYCLOAK_ADMIN_PASSWORD: admin@123
+    command: ["start-dev"]
+    ports:
+      - 8080:8080
+    depends_on:
+      - mysql
+
+  self-services:
+    build: .
+    ports:
+      - 4000:3000
+    environment:
+      FINERACT_BASE_URL: https://corebanking.io
+      FINERACT_TENANT: default
+      FINERACT_BASE_PATH:  /fineract-provider/api/v1
+      KEYCLOAK_URL: http://keycloak:8080/auth
+      KEYCLOAK_REALM: your-realm
+      KEYCLOAK_CLIENT_ID: your-client-id
+      KEYCLOAK_CLIENT_SECRET: your-client-secret
+      SERVER_PORT: 8000
+    volumes:
+      - ./app:/app
+    working_dir: /app
+    command: ["npm", "start"]
+    depends_on:
+      - keycloak
+      - mysql
