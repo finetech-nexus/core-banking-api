@@ -1,6 +1,9 @@
 import { Router, Request, Response } from "express";
 import { keycloakProtect } from "../middlewares/keycloakProtect";
 import { makeRequest } from "../middlewares/fineractRequest";
+import { getClients } from "../services/fineractClient";
+import { getFineractAccessToken } from "../services/keycloak-admin";
+import { logger } from "../logger";
 
 export const route = Router();
 
@@ -71,16 +74,34 @@ export const route = Router();
  */
 route.post("/", keycloakProtect, async (req: any, res: Response) => {
   const userId = req.userInfo.sub;
-  const { name, accountNo, bankCode } = req.body;
+  const tenantId = req.headers["fineract-platform-tenantid"];
+  const auth = req.headers["authorization"];
+  logger.debug("POST /client_beneficiaries", { userId, tenantId });
+  if (!tenantId || !auth) {
+    return res.status(400).json({ error: "Missing Fineract headers" });
+  }
   try {
-    const tenantId = req.headers['Fineract-Platform-TenantId'];
-    const auth = req.headers['Authorization'];
-    const response = await makeRequest({method:'POST', endpoint:'/self/beneficiaries/tpt', data: req.body, auth: auth, tenant: tenantId});
+    const clients = await getClients(userId, tenantId);
+    if (!Array.isArray(clients) || clients.length !== 1) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+    const clientId = clients[0].id;
+    const token = await getFineractAccessToken(); 
+    let authToken = 'Bearer ' + token;
+    const response = await makeRequest({
+      method: "POST",
+      endpoint: `/datatables/beneficiaries_client/${clientId}`,
+      data: req.body,
+      auth: authToken,
+      tenant: tenantId,
+    });
     return res.json(response);
   } catch (err) {
+    logger.error("Error adding beneficiary", { error: err });
     return res.status(500).json({ error: "Failed to add beneficiary" });
   }
 });
+
 
 /**
  * @swagger
@@ -107,12 +128,59 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
  */
 route.get("/", keycloakProtect, async (req: any, res: Response) => {
   const userId = req.userInfo.sub;
+  const tenantId = req.headers["fineract-platform-tenantid"];
+  logger.debug("GET /client_beneficiaries", { userId, tenantId });
+  if (!tenantId) {
+    return res.status(400).json({ error: "Missing Fineract headers" });
+  }
   try {
-    const tenantId = req.headers['Fineract-Platform-TenantId'];
-    const auth = req.headers['Authorization'];
-    const response = await makeRequest({method:'GET', endpoint:'/self/beneficiaries/tpt', auth: auth, tenant: tenantId});
-    res.json(response);
+    const clients = await getClients(userId, tenantId);
+    if (!Array.isArray(clients) || clients.length !== 1) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+    const clientId = clients[0].id;
+    const token = await getFineractAccessToken(); 
+    let authToken = 'Bearer ' + token;
+    
+    const response = await makeRequest({
+      method: "GET",
+      endpoint: `/datatables/beneficiaries_client/${clientId}`,
+      data: req.body,
+      auth: authToken,
+      tenant: tenantId,
+    });
+    return res.json(response);
   } catch (err) {
-    return res.status(500).json({ error: "Could not fetch beneficiaries" });
+    logger.error("Error delete beneficiary", { error: err });
+    return res.status(500).json({ error: "Failed to delete beneficiary" });
+  }
+});
+
+route.delete("/:id", keycloakProtect, async (req: any, res: Response) => {
+  const userId = req.userInfo.sub;
+  const tenantId = req.headers["fineract-platform-tenantid"];
+  const id = req.params.id
+  logger.debug("GET /client_beneficiaries", { userId, tenantId });
+  if (!tenantId) {
+    return res.status(400).json({ error: "Missing Fineract headers" });
+  }
+  try {
+    const clients = await getClients(userId, tenantId);
+    if (!Array.isArray(clients) || clients.length !== 1) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+    const clientId = clients[0].id;
+    const token = await getFineractAccessToken(); 
+    let authToken = 'Bearer ' + token;
+    const response = await makeRequest({
+      method: "DELETE",
+      endpoint: `/datatables/beneficiaries_client/${clientId}/${id}`,
+      auth: authToken,
+      tenant: tenantId,
+    });
+    return res.json(response);
+  } catch (err) {
+    logger.error("Error delete beneficiary", { error: err });
+    return res.status(500).json({ error: "Failed to delete beneficiary" });
   }
 });

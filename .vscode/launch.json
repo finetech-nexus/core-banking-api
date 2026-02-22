@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Run server.ts (ts-node)",
+      "program": "${workspaceFolder}/app/server.ts",
+      "envFile": "${workspaceFolder}/.env",
+      "runtimeArgs": [
+        "-r",
+        "ts-node/register",
+        "-r",
+        "tsconfig-paths/register"
+      ],
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}

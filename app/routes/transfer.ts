@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { keycloakProtect } from "../middlewares/keycloakProtect";
-import { makeRequest } from "../middlewares/fineractRequest";
+import { channelRequest } from "../middlewares/channelRequest";
+import { logger } from "../logger";
 
 export const route = Router();
 
@@ -70,6 +71,7 @@ export const route = Router();
  *       500:
  *         description: Transfer failed due to server error
  */
+/*
 route.post("/", keycloakProtect, async (req: any, res: Response) => {
   try {
     const tenantId = req.headers['Fineract-Platform-TenantId'];
@@ -79,4 +81,26 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
   } catch (err) {
     return res.status(500).json({ error: "Transfer failed" });
   }
+});*/
+route.post("/request", keycloakProtect, async (req: any, res: Response) => {
+
+    const tenantId = req.headers["fineract-platform-tenantid"];
+    
+    logger.debug("POST /transfer/request", { body: req.body });
+    const auth = req.headers['Authorization'];
+    if (!tenantId) {
+      return res.status(400).json({ error: "Missing Fineract headers" });
+    }
+    try {
+      //const token = await getFineractAccessToken(); 
+      //let authToken = 'Bearer ' + token;
+      const response = await channelRequest({method:'POST', endpoint:'/channel/transfer', data: req.body, auth: auth, tenant: tenantId});
+      res.json(response);
+      return res.json(response);
+    } catch (err) {
+      logger.error("Error transfer request", { error: err });
+      return res.status(500).json({ error: "Failed request transfer" });
+    }
+
+ 
 });

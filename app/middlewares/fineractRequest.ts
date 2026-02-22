@@ -8,7 +8,7 @@ interface MakeRequestOptions {
   auth?: string | null;
   tenant?: string;
 }
-
+  const DEFAULT_TENANT = process.env.FINERACT_TENANT || "default";
 // API Request Helper
 export async function makeRequest<T = any>({
   method,

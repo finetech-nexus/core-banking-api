@@ -34,7 +34,7 @@ services:
     depends_on:
       - mysql
 
-  self-services:
+  core-banking-api:
     build: .
     ports:
       - 4000:3000

@@ -1,0 +1,148 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Core Banking API",
+    "description": "Core banking: auth (Keycloak), accounts, products, beneficiaries, transfers, KYC.",
+    "version": "1.0.0"
+  },
+  "servers": [{ "url": "/", "description": "Current host" }],
+  "tags": [
+    { "name": "Auth", "description": "Authentication and user management" },
+    { "name": "Accounts", "description": "Client and account info" },
+    { "name": "Product", "description": "Currency products" },
+    { "name": "Beneficiary", "description": "Beneficiaries" },
+    { "name": "Transfer", "description": "Transfers" },
+    { "name": "KYC", "description": "KYC webhook" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" },
+          "code": { "type": "string" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/auth/registrations/phone_verify": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Verify phone OTP",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["phone_number", "otp"], "properties": { "phone_number": { "type": "string" }, "otp": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "OK" }, "400": { "description": "Validation error" }, "500": { "description": "Server error" } }
+      }
+    },
+    "/api/auth/registrations/email_verify": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Verify email OTP",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["email", "otp"], "properties": { "email": { "type": "string", "format": "email" }, "otp": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "OK" }, "400": { "description": "Validation error" }, "500": { "description": "Server error" } }
+      }
+    },
+    "/api/auth/registrations/register": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Register user (Keycloak + optional Fineract onboarding)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "201": { "description": "Created" }, "400": { "description": "Validation error" }, "500": { "description": "Server error" } }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Login (phone+OTP or credentials)",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Tokens" }, "401": { "description": "Invalid credentials" }, "500": { "description": "Server error" } }
+      }
+    },
+    "/api/auth/token": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Refresh token",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "refresh_token": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "New tokens" }, "403": { "description": "Invalid refresh token" }, "500": { "description": "Server error" } }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Logout",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "204": { "description": "Logged out" }, "401": { "description": "Unauthorized" }, "500": { "description": "Server error" } }
+      }
+    },
+    "/api/account": {
+      "get": {
+        "tags": ["Accounts"],
+        "summary": "Get client and accounts (requires Authorization + Fineract tenant header)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Client and accounts" }, "400": { "description": "Missing headers" }, "404": { "description": "Client not found" }, "500": { "description": "Server error" } }
+      },
+      "post": {
+        "tags": ["Accounts"],
+        "summary": "Create savings account for currency",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Account created" }, "400": { "description": "Bad request" }, "500": { "description": "Server error" } }
+      }
+    },
+    "/api/product": {
+      "get": {
+        "tags": ["Product"],
+        "summary": "Get currency products",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Products" }, "500": { "description": "Server error" } }
+      }
+    },
+    "/api/beneficiary": {
+      "get": {
+        "tags": ["Beneficiary"],
+        "summary": "List beneficiaries",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Beneficiaries" }, "500": { "description": "Server error" } }
+      },
+      "post": {
+        "tags": ["Beneficiary"],
+        "summary": "Add beneficiary",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Added" }, "400": { "description": "Validation error" }, "500": { "description": "Server error" } }
+      },
+      "delete": {
+        "tags": ["Beneficiary"],
+        "summary": "Delete beneficiary",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Deleted" }, "500": { "description": "Server error" } }
+      }
+    },
+    "/api/transfer/request": {
+      "post": {
+        "tags": ["Transfer"],
+        "summary": "Transfer request",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "OK" }, "500": { "description": "Server error" } }
+      }
+    },
+    "/api/kyc/onboarding": {
+      "post": {
+        "tags": ["KYC"],
+        "summary": "KYC onboarding webhook",
+        "responses": { "200": { "description": "OK" }, "500": { "description": "Server error" } }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  }
+}

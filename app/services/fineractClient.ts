@@ -1,82 +1,120 @@
-require('dotenv').config();
-const axios = require('axios');
-const qs = require('qs');
+// fineractClient.ts
+import { makeRequest } from "../middlewares/fineractRequest";
+import { getFineractAccessToken } from "./keycloak-admin";
+import { logger } from "../logger";
 
-const FINERACT_URL = process.env.FINERACT_URL;
-const USERNAME = process.env.FINERACT_USERNAME;
-const PASSWORD = process.env.FINERACT_PASSWORD;
-
-// Basic auth header
-const auth = {
-    username: USERNAME,
-    password: PASSWORD
-};
-
-// 1. Create a client (after KYC approval)
-async function createClient(user) {
-    try {
-        const response = await axios.post(
-            `${FINERACT_URL}/clients`,
-            {
-                firstname: user.firstName,
-                lastname: user.lastName,
-                dateOfBirth: user.dob,       // format YYYY-MM-DD
-                mobileNo: user.phone,
-                active: true,
-                activationDate: new Date().toISOString().split('T')[0]
-            },
-            { auth }
-        );
-        console.log('Client created:', response.data);
-        return response.data.resourceId; // clientId
-    } catch (error) {
-        console.error('Error creating client:', error.response?.data || error.message);
-        throw error;
-    }
+interface ClientData {
+  gender: string;
+  firstName: string;
+  lastName: string;
+  dob: string; // YYYY-MM-DD
+  phone: string;
+  email: string;
+  nationality: string;
+  externalId: string;
+  officeId: number;
+  address: string;
+  postalCode: string;
+  city: string;
+  country:string;
 }
 
-// 2. Create a savings account for the client
-async function createSavingsAccount(clientId, productId) {
-    try {
-        const response = await axios.post(
-            `${FINERACT_URL}/savingsaccounts`,
-            {
-                clientId,
-                productId,                 // ID of the savings product in Fineract
-                submittedOnDate: new Date().toISOString().split('T')[0],
-                savingsProductId: productId,
-                status: 'submitted'         // or 'approved' if auto-approved
-            },
-            { auth }
-        );
-        console.log('Savings account created:', response.data);
-        return response.data.resourceId; // accountId
-    } catch (error) {
-        console.error('Error creating savings account:', error.response?.data || error.message);
-        throw error;
-    }
+//TODO: Full call
+//https://fineract.apache.org/docs/legacy/index.html#clients_create
+export async function createClient(client: ClientData, auth: string, tenant?: string) {
+  const data = {
+    firstname: client.firstName,
+    lastname: client.lastName,
+    dateOfBirth: client.dob,
+    //mobileNo: client.phone,
+    emailAddress: client.email,
+    active: true,
+    activationDate: new Date().toISOString().split('T')[0],
+    dateFormat: "yyyy-MM-dd",
+    locale: "fr",
+    officeId: client.officeId,
+    externalId: client.externalId,
+    legalFormId: 1 , //1 = Person or2 = Entity
+  };
+  logger.debug("createClient", { firstname: data.firstname, lastname: data.lastname });
+  const response = await makeRequest({
+    method: 'POST',
+    endpoint: '/clients',
+    data,
+    auth,
+    tenant
+  });
+
+  if ((response as any).error) {
+    logger.error("Error POST /clients", { message: (response as any).message });
+    throw response;
+  }
+
+  //TODO save adress
+  //POST /clients/{clientId}/addresses?tenantIdentifier=default
+  /*{
+  "street": "123 Main St",
+  "addressTypeId": 1,
+  "isActive": true,
+  "city": "Tunis",
+  "stateProvinceId": 1,
+  "countryId": 1,
+  "postalCode": "1001",
+  "dateFormat": "yyyy-MM-dd",
+  "locale": "en",
+  "createdOn": "2025-09-25"
+}*/
+
+  return (response as any).resourceId; // clientId
 }
 
-// Example usage
-(async () => {
-    try {
-        const user = {
-            firstName: 'John',
-            lastName: 'Doe',
-            dob: '1990-01-01',
-            phone: '+1234567890'
-        };
+/**
+ * 
+ * @param externalId 
+ * @param tenant 
+ * @returns 
+ */
+export async function getClients(externalId: string, tenant?: string) {
+  // 0. get Fineract token 
+  const token = await getFineractAccessToken(); 
+  let authToken = 'Bearer ' + token;
+  // 1. get clients
+  const response = await makeRequest({
+      method: "GET",
+      endpoint: `/clients?externalId=${externalId}`,
+      auth: authToken,
+      tenant: tenant,
+    });
+  return response.pageItems || [];
+}
 
-        const savingsProductId = 1; // replace with your actual savings product ID
+export async function getClient(clientId: string, tenant?: string) {
+  // 0. get Fineract token 
+  const token = await getFineractAccessToken(); 
+  let authToken = 'Bearer ' + token;
+  // 1. get clients
+  const response = await makeRequest({
+      method: "GET",
+      endpoint: `/clients/${clientId}`,
+      auth: authToken,
+      tenant: tenant,
+    });
+  return response;
+}
 
-        // 1. Create client
-        const clientId = await createClient(user);
+export async function createBeneficiary(clientId: string, tenantId?: string, beneficiary?: any) {
+  // 0. get Fineract token 
+  const token = await getFineractAccessToken(); 
+  let authToken = 'Bearer ' + token;
+  
+  // 2. createBeneficiary
+  const response = await makeRequest({
+    method: "POST",
+    endpoint: `/datatables/beneficiaries_client/${clientId}`,
+    data: beneficiary,
+    auth: authToken,
+    tenant: tenantId,
+  });
+  return response;
 
-        // 2. Create savings account
-        const accountId = await createSavingsAccount(clientId, savingsProductId);
-
-        console.log(`Successfully created client ${clientId} with account ${accountId}`);
-    } catch (err) {
-        console.error('Provisioning failed:', err.message);
-    }
-})();
+}

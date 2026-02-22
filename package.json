@@ -1,7 +1,7 @@
 {
-  "name": "SelfService",
+  "name": "core-banking-api",
   "version": "1.0.0",
-  "description": "SelfService For Customer",
+  "description": "Core Banking API For Customer",
   "main": "app.js",
   "scripts": {
     "start": "node dist/server.js",
@@ -13,14 +13,16 @@
   "dependencies": {
     "axios": "^1.4.0",
     "bcryptjs": "^2.4.3",
-    "dotenv": "^16.0.3",
+    "dotenv": "^16.6.1",
     "express": "^4.18.2",
     "express-validator": "^7.0.1",
     "jsonwebtoken": "^9.0.0",
     "jwks-rsa": "^3.0.1",
+    "kafkajs": "^2.2.4",
     "node-cache": "^5.1.2",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^4.6.3"
+    "swagger-ui-express": "^4.6.3",
+    "winston": "^3.19.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.17",

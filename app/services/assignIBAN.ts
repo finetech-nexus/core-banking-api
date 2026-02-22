@@ -1,24 +1,38 @@
 // assignIBAN.ts
-import { makeRequest } from './fineractRequest';
+import { makeRequest } from "../middlewares/fineractRequest";
+import { logger } from "../logger";
+
+export async function createIBANTable(auth: string, tenant?: string) {
+  logger.debug("Call datatables");
+  const response = await makeRequest({
+    method: 'POST',
+    endpoint: `/datatables/`,
+    data: { name :'iban', type: 'String', length:'34', mandatory:'true', unique: 'true' },
+    auth,
+    tenant
+  });
+  logger.debug("IBAN table creation OK");
+  return response;
+}
 
 export async function assignIBAN(accountId: number, iban: string, auth: string, tenant?: string) {
-  const resp = await makeRequest({
+  logger.debug("Call Assign IBAN", { accountId });
+  const response = await makeRequest({
     method: 'POST',
-    endpoint: `/savingsaccounts/${accountId}/assign-iban`,
+    endpoint: `/datatables/savings_iban/${accountId}`,
     data: { iban },
     auth,
     tenant
   });
-
-  if ((resp as any).error) {
-    throw new Error(`Failed to assign IBAN: ${(resp as any).message}`);
+  if ((response as any).error) {
+    logger.error("Error POST /datatables/savings_iban", { accountId, message: (response as any).message });
+    throw response;
   }
-
-  console.log(`Virtual IBAN ${iban} assigned to account ${accountId}`);
-  return resp;
+  logger.info("Virtual IBAN assigned", { accountId, iban });
+  return response;
 }
 
-export async function generateRandomNumber(length: number): string {
+export   function generateRandomNumber(length: number): string {
   let result = '';
   for (let i = 0; i < length; i++) {
     result += Math.floor(Math.random() * 10).toString();
@@ -27,7 +41,7 @@ export async function generateRandomNumber(length: number): string {
 }
 
 // Convert letters to numbers (A=10, B=11, ..., Z=35)
-export async function lettersToNumbers(str: string): string {
+export   function lettersToNumbers(str: string): string {
   return str.toUpperCase().split('').map(ch => {
     const code = ch.charCodeAt(0);
     if (code >= 65 && code <= 90) {
@@ -37,18 +51,59 @@ export async function lettersToNumbers(str: string): string {
   }).join('');
 }
 
-// Compute check digits using MOD97
-export async function computeCheckDigits(countryCode: string, bban: string): string {
-  const rearranged = bban + lettersToNumbers(countryCode) + '00';
-  const mod = BigInt(rearranged) % 97n;
-  const checkDigits = 98n - mod;
-  return checkDigits.toString().padStart(2, '0');
+ 
+
+// TODO: pass the accountNumber after account creation with apdate, actually random accountNumber
+export function generateIBAN(accountNumber?: string): string {
+  const bankCode = String(process.env.BANK_CODE);   // always string
+  const countryCode = String(process.env.COUNTRY_CODE).toUpperCase(); // TN, always uppercase
+  const ACCOUNT_LENGTH = 12;
+
+  if (!bankCode || !countryCode) {
+    throw new Error("BANK_CODE and COUNTRY_CODE are required");
+  }
+
+  if (!/^[A-Z]{2}$/.test(countryCode)) {
+    throw new Error("COUNTRY_CODE must be a valid 2-letter ISO code");
+  }
+
+  // Normalize account number (digits only)
+  const cleanAccount = accountNumber?.replace(/\D/g, "") || "";
+
+  // If account number is empty, generate 12 random digits
+  const finalAccount =
+    cleanAccount.length > 0
+      ? cleanAccount.padStart(ACCOUNT_LENGTH, "0")
+      : Array.from({ length: ACCOUNT_LENGTH }, () => Math.floor(Math.random() * 10)).join("");
+
+  // Concatenate bank code + account number as string
+  const bban = bankCode + finalAccount;
+
+  // Convert letters A-Z to numbers 10-35
+  const lettersToNumbers = (str: string): string =>
+    str.replace(/[A-Z]/gi, (ch) => (ch.toUpperCase().charCodeAt(0) - 55).toString());
+
+  // Compute MOD97 check digits
+  const computeCheckDigits = (country: string, bban: string): string => {
+    const rearranged = bban + lettersToNumbers(country) + "00";
+    let remainder = 0;
+
+    // Process in chunks to avoid big numbers
+    for (let i = 0; i < rearranged.length; i += 9) {
+      const block = String(remainder) + rearranged.substring(i, i + 9);
+      remainder = parseInt(block, 10) % 97;
+    }
+
+    return String(98 - remainder).padStart(2, "0");
+  };
+
+  const checkDigits = computeCheckDigits(countryCode, bban);
+
+  const iban = countryCode + checkDigits + bban;
+  logger.debug("IBAN generated", { countryCode, checkDigits, bankCode, finalAccount, bban });
+  return iban.toString();
 }
 
-// Generate Tunisian IBAN
-export function generateTunisianIBAN(bankCode?: string, accountNumber?: string): string {
-  const countryCode = 'TN';
-  const bban = (bankCode || generateRandomNumber(8)) + (accountNumber || generateRandomNumber(12));
-  const checkDigits = computeCheckDigits(countryCode, bban);
-  return `${countryCode}${checkDigits}${bban}`;
-}
+
+
+
