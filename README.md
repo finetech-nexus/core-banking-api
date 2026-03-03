@@ -21,6 +21,13 @@ Backend API for core banking: Keycloak auth (OTP, register, login, token refresh
 - **Errors:** Global error middleware, `AppError`, consistent JSON responses  
 - **Docs:** OpenAPI 3 (Swagger UI at `/api-docs`)
 
+## CI/CD
+
+- **Build and push image** (`.github/workflows/build-push-image.yml`): on push to `main`, builds and pushes the image to Docker Hub as `nexusbank/core-banking-api:latest` and `nexusbank/core-banking-api:<short-sha>`.
+- **Release image** (`.github/workflows/release-image.yml`): when you create a GitHub Release or push a tag `v*` (e.g. `v1.0.0`), builds and pushes `nexusbank/core-banking-api:<tag>`.
+
+Set secrets `DOCKER_USER`, `DOCKER_PASSWORD`; optional var `DOCKER_ORGANIZATION` (default `nexusbank`).
+
 ## Prerequisites
 
 - Node.js 18+
