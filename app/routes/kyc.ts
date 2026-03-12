@@ -178,10 +178,14 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
 }
  */
 
-route.post("/onboarding",keycloakProtect, async (req: any, res: Response) => {
+route.post("/onboarding", async (req: any, res: Response) => {
 
    //res.status(200).json({ received: true }); 
 
+
+   console.log("call /onboarding with header",req.headers.authorization);
+   const token = req.headers.authorization.split(" ").at(-1) ?? "";
+   console.log("token",token);
   try {
     const payload = req.body;
     //console.log(JSON.stringify(payload))
