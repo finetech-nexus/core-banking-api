@@ -77,6 +77,7 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
   const tenantId = req.headers["fineract-platform-tenantid"];
   const auth = req.headers["authorization"];
   logger.debug("POST /client_beneficiaries", { userId, tenantId });
+  console.log(JSON.stringify(req.body))
   if (!tenantId || !auth) {
     return res.status(400).json({ error: "Missing Fineract headers" });
   }
@@ -95,6 +96,7 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
       auth: authToken,
       tenant: tenantId,
     });
+    
     return res.json(response);
   } catch (err) {
     logger.error("Error adding beneficiary", { error: err });

@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { makeRequest } from "../middlewares/fineractRequest";
 import { keycloakProtect } from "../middlewares/keycloakProtect";
 import { onboardUser } from "../services/coreBankingProcessor";
-import { getAdminAccessToken, getUserByEmail } from "../services/keycloak-admin";
+import { getAdminAccessToken, getGlobalAdminAccessToken,getUserByEmail } from "../services/keycloak-admin";
 import axios from "axios";
 import { logger } from "../logger";
 
@@ -178,14 +178,11 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
 }
  */
 
-route.post("/onboarding", async (req: any, res: Response) => {
+route.post("/onboarding",keycloakProtect, async (req: any, res: Response) => {
 
    //res.status(200).json({ received: true }); 
-
-
-   console.log("call /onboarding with header",req.headers.authorization);
-   const token = req.headers.authorization.split(" ").at(-1) ?? "";
-   console.log("token",token);
+   console.log("call /onboarding with header",req.body); 
+ 
   try {
     const payload = req.body;
     //console.log(JSON.stringify(payload))
@@ -219,6 +216,7 @@ route.post("/onboarding", async (req: any, res: Response) => {
       const token = await getAdminAccessToken();
 
       const url = `${process.env.KEYCLOAK_URL}/realms/${process.env.KEYCLOAK_REALM}/registrations/register`;
+      console.log("Register user:",url,body);
       const  result1 = await axios.post(
         url,
         body,
@@ -229,6 +227,25 @@ route.post("/onboarding", async (req: any, res: Response) => {
           },
         }
       );
+       // Update global in keycloak
+       const tokenGlobal = await getGlobalAdminAccessToken();
+
+       const urlGlobal = `${process.env.GLOBAL_KEYCLOAK_URL}/realms/${process.env.GLOBAL_KEYCLOAK_REALM}/registrations/update-user`;
+       const resultGlobal = await axios.post(
+        urlGlobal,
+        {
+          email: payload.data.entity.data.email || null,
+          kyc: process.env.TENANT,
+          verificationId: result1.data.id,
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${tokenGlobal}`,
+          },
+        }
+      );
+
 
       //CB
   //TODO

@@ -381,6 +381,9 @@ route.post("/token", async (req: Request, res: Response) => {
       return res.status(400).json({ code: errors.array()[0].type, message: errors.array()[0].msg });
     }
 
+
+    
+
     const { subject_token } = req.body;
 
     const url = `${process.env.KEYCLOAK_URL}/realms/${process.env.KEYCLOAK_REALM}/protocol/openid-connect/token`;
@@ -393,6 +396,10 @@ route.post("/token", async (req: Request, res: Response) => {
     params.append("client_secret", process.env.KEYCLOAK_CLIENT_SECRET ?? "");
     params.append("subject_token", subject_token);
 
+
+    console.log(subject_token);
+    console.log(process.env.SUBJECT_ISSUER);
+    console.log(process.env.KEYCLOAK_CLIENT_ID);
     const kc_response = await axios.post(url, params, {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
     });

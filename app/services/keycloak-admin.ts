@@ -22,6 +22,26 @@ export const getAdminAccessToken = async () => {
   return token;
 };
 
+export const getGlobalAdminAccessToken = async () => {
+  let token = cache.get("access_token_global");
+  if (!token) {
+    const body = {
+      grant_type: "client_credentials",
+      client_id: process.env.GLOBAL_KEYCLOAK_CLIENT_ID ?? "",
+      client_secret: process.env.GLOBAL_KEYCLOAK_CLIENT_SECRET ?? "",
+    };
+    const url = `${process.env.GLOBAL_KEYCLOAK_URL}/realms/${process.env.GLOBAL_KEYCLOAK_REALM}/protocol/openid-connect/token`;
+    const response = await axios.post(url, body, {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    });
+    token = response.data.access_token;
+    cache.set("access_token_global", token, 60 * 5);
+  }
+  return token;
+};
+
 export const getFineractAccessToken = async () => {
   let token = cache.get("access_token_fineract");
   if (!token) {

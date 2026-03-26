@@ -17,7 +17,7 @@ export interface CurrencyProduct {
 }
  
 
-route.get("/", keycloakProtect, async (req: any, res: Response) => {
+route.get("/", async (req: any, res: Response) => {
   try {
     logger.debug("GET /product");
     const tenantId = req.headers["fineract-platform-tenantid"];
