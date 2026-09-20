@@ -40,14 +40,23 @@ route.get("/", async (req: any, res: Response) => {
       enabled: false,                          // default, will update later
     }));
  
-    // 2️⃣ Get client(s)
-    const clients = await getClients(userId, tenantId);
-
     let accounts: any[] = [];
 
-    // 3️⃣ Get accounts if client exists
-    if (Array.isArray(clients) && clients.length === 1) {
-      accounts = await getAccounts(clients[0].id, tenantId);
+    // 2️⃣ Get client accounts when we know the user. Missing/unknown clients
+    // must not fail the product catalog — home still needs other-tenant slides.
+    if (userId) {
+      try {
+        const clients = await getClients(userId, tenantId);
+        if (Array.isArray(clients) && clients.length === 1) {
+          accounts = await getAccounts(clients[0].id, tenantId);
+        }
+      } catch (clientError) {
+        logger.warn("Could not load client accounts for product flags", {
+          tenantId,
+          userId,
+          error: clientError,
+        });
+      }
     }
  
 
