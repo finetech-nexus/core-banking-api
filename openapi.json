@@ -2,17 +2,42 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Core Banking API",
-    "description": "Core banking: auth (Keycloak), accounts, products, beneficiaries, transfers, KYC.",
+    "description": "Per-tenant adapter (`core-banking-api`). Fineract ledger + Payment Hub channel. Deployed as `api` (TN) and `api-eu` (EU).",
     "version": "1.0.0"
   },
-  "servers": [{ "url": "/", "description": "Current host" }],
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Local"
+    },
+    {
+      "url": "/",
+      "description": "Current host"
+    }
+  ],
   "tags": [
-    { "name": "Auth", "description": "Authentication and user management" },
-    { "name": "Accounts", "description": "Client and account info" },
-    { "name": "Product", "description": "Currency products" },
-    { "name": "Beneficiary", "description": "Beneficiaries" },
-    { "name": "Transfer", "description": "Transfers" },
-    { "name": "KYC", "description": "KYC webhook" }
+    {
+      "name": "Health"
+    },
+    {
+      "name": "Auth",
+      "description": "Tenant Keycloak; /token is token-exchange"
+    },
+    {
+      "name": "Accounts"
+    },
+    {
+      "name": "Product"
+    },
+    {
+      "name": "Beneficiary"
+    },
+    {
+      "name": "Transfer"
+    },
+    {
+      "name": "KYC"
+    }
   ],
   "components": {
     "securitySchemes": {
@@ -22,126 +47,1037 @@
         "bearerFormat": "JWT"
       }
     },
+    "parameters": {
+      "FineractTenant": {
+        "name": "Fineract-Platform-TenantId",
+        "in": "header",
+        "required": true,
+        "description": "Fineract tenant identifier (`nexusbank` or `nexusbankfr`).",
+        "schema": {
+          "type": "string",
+          "example": "nexusbank"
+        }
+      }
+    },
     "schemas": {
       "Error": {
         "type": "object",
         "properties": {
-          "message": { "type": "string" },
-          "code": { "type": "string" }
+          "message": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "TokenResponse": {
+        "type": "object",
+        "properties": {
+          "access_token": {
+            "type": "string"
+          },
+          "refresh_token": {
+            "type": "string"
+          },
+          "expires_in": {
+            "type": "integer"
+          },
+          "refresh_expires_in": {
+            "type": "integer"
+          },
+          "token_type": {
+            "type": "string",
+            "example": "Bearer"
+          },
+          "scope": {
+            "type": "string"
+          }
+        }
+      },
+      "AccountClient": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "integer"
+          },
+          "clientName": {
+            "type": "string"
+          },
+          "clientType": {
+            "type": "string"
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Account"
+            }
+          }
+        }
+      },
+      "Account": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "description": "Fineract accountNo"
+          },
+          "balance": {
+            "type": "number"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "externalId": {
+            "type": "string",
+            "description": "Virtual IBAN"
+          },
+          "swift": {
+            "type": "string"
+          },
+          "transactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Transaction"
+            }
+          }
+        }
+      },
+      "Transaction": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "date": {},
+          "title": {
+            "type": "string"
+          },
+          "transactionType": {
+            "type": "string"
+          },
+          "entryType": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "reversed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CurrencyProduct": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "shortName": {
+            "type": "string"
+          },
+          "currencyCode": {
+            "type": "string"
+          },
+          "currencySymbol": {
+            "type": "string"
+          },
+          "userSubscriptionEnabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TransferRequest": {
+        "type": "object",
+        "required": [
+          "payer",
+          "payee",
+          "amount"
+        ],
+        "properties": {
+          "clientRefId": {
+            "type": "string"
+          },
+          "payer": {
+            "$ref": "#/components/schemas/Party"
+          },
+          "payee": {
+            "$ref": "#/components/schemas/Party"
+          },
+          "note": {
+            "type": "string"
+          },
+          "amountType": {
+            "type": "string",
+            "example": "SEND"
+          },
+          "amount": {
+            "type": "object",
+            "properties": {
+              "amount": {
+                "type": "number"
+              },
+              "currency": {
+                "type": "string"
+              }
+            }
+          },
+          "transactionType": {
+            "type": "object",
+            "properties": {
+              "scenario": {
+                "type": "string",
+                "example": "TRANSFER"
+              },
+              "initiator": {
+                "type": "string",
+                "example": "PAYER"
+              },
+              "initiatorType": {
+                "type": "string",
+                "example": "CONSUMER"
+              }
+            }
+          }
+        }
+      },
+      "Party": {
+        "type": "object",
+        "properties": {
+          "partyIdInfo": {
+            "type": "object",
+            "properties": {
+              "partyIdType": {
+                "type": "string",
+                "enum": [
+                  "MSISDN",
+                  "EMAIL",
+                  "PERSONAL_ID",
+                  "BUSINESS",
+                  "DEVICE",
+                  "ACCOUNT_ID",
+                  "IBAN",
+                  "ALIAS"
+                ]
+              },
+              "partyIdentifier": {
+                "type": "string"
+              },
+              "partySubIdOrType": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "DepositRequest": {
+        "type": "object",
+        "required": [
+          "savingsAccountId",
+          "amount"
+        ],
+        "properties": {
+          "savingsAccountId": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "note": {
+            "type": "string"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "paymentTypeId": {
+            "type": "string"
+          },
+          "receiptNumber": {
+            "type": "string"
+          },
+          "devise": {
+            "type": "string"
+          }
         }
       }
     }
   },
   "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Liveness",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/auth/registrations/phone_verify": {
       "post": {
-        "tags": ["Auth"],
-        "summary": "Verify phone OTP",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["phone_number", "otp"], "properties": { "phone_number": { "type": "string" }, "otp": { "type": "string" } } } } } },
-        "responses": { "200": { "description": "OK" }, "400": { "description": "Validation error" }, "500": { "description": "Server error" } }
+        "tags": [
+          "Auth"
+        ],
+        "summary": "SMS OTP via tenant Keycloak",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "phone_number"
+                ],
+                "properties": {
+                  "phone_number": {
+                    "type": "string",
+                    "example": "+21620123456"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "minLength": 4,
+                    "maxLength": 6,
+                    "description": "Omit to request OTP; send to verify."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/auth/registrations/email_verify": {
       "post": {
-        "tags": ["Auth"],
-        "summary": "Verify email OTP",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["email", "otp"], "properties": { "email": { "type": "string", "format": "email" }, "otp": { "type": "string" } } } } } },
-        "responses": { "200": { "description": "OK" }, "400": { "description": "Validation error" }, "500": { "description": "Server error" } }
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Email OTP via tenant Keycloak",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "minLength": 4,
+                    "maxLength": 6
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/auth/registrations/register": {
       "post": {
-        "tags": ["Auth"],
-        "summary": "Register user (Keycloak + optional Fineract onboarding)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
-        "responses": { "201": { "description": "Created" }, "400": { "description": "Validation error" }, "500": { "description": "Server error" } }
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Register in tenant Keycloak (Fineract onboard after register is commented out)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "phone_number",
+                  "email"
+                ],
+                "properties": {
+                  "phone_number": {
+                    "type": "string",
+                    "example": "+21620123456"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "first_name": {
+                    "type": "string"
+                  },
+                  "last_name": {
+                    "type": "string"
+                  },
+                  "gender": {
+                    "type": "string"
+                  },
+                  "birthday": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "nationality": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    ]
+                  },
+                  "address": {
+                    "type": "string"
+                  },
+                  "postalCode": {
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": "string"
+                  },
+                  "country": {
+                    "type": "string"
+                  },
+                  "kyc_eu": {
+                    "type": "boolean"
+                  },
+                  "kyc_tn": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/auth/login": {
       "post": {
-        "tags": ["Auth"],
-        "summary": "Login (phone+OTP or credentials)",
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
-        "responses": { "200": { "description": "Tokens" }, "401": { "description": "Invalid credentials" }, "500": { "description": "Server error" } }
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Phone + OTP password grant against tenant realm",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "phone_number",
+                  "otp"
+                ],
+                "properties": {
+                  "phone_number": {
+                    "type": "string",
+                    "example": "+21620123456"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "minLength": 4,
+                    "maxLength": 6,
+                    "description": "Omit to request OTP; send to verify."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/auth/token": {
       "post": {
-        "tags": ["Auth"],
-        "summary": "Refresh token",
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "refresh_token": { "type": "string" } } } } } },
-        "responses": { "200": { "description": "New tokens" }, "403": { "description": "Invalid refresh token" }, "500": { "description": "Server error" } }
+        "tags": [
+          "Auth"
+        ],
+        "summary": "OAuth token exchange (subject_token from global realm)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "subject_token"
+                ],
+                "properties": {
+                  "subject_token": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/auth/logout": {
       "post": {
-        "tags": ["Auth"],
-        "summary": "Logout",
-        "security": [{ "bearerAuth": [] }],
-        "responses": { "204": { "description": "Logged out" }, "401": { "description": "Unauthorized" }, "500": { "description": "Server error" } }
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Admin logout",
+        "responses": {
+          "204": {
+            "description": "Logged out"
+          }
+        }
+      }
+    },
+    "/api/auth/logout-event": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Stub",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/auth/set-password": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Reset with query token",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/auth/forgot-password": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Stub JWT (no email)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/auth/verify-email": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Broken in current code",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/auth/login/magiclink": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Magic-link grant (email send not implemented)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Attempted"
+          }
+        }
       }
     },
     "/api/account": {
       "get": {
-        "tags": ["Accounts"],
-        "summary": "Get client and accounts (requires Authorization + Fineract tenant header)",
-        "security": [{ "bearerAuth": [] }],
-        "responses": { "200": { "description": "Client and accounts" }, "400": { "description": "Missing headers" }, "404": { "description": "Client not found" }, "500": { "description": "Server error" } }
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Clients + savings + last transactions for Keycloak sub",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AccountClient"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Client not found"
+          }
+        }
       },
       "post": {
-        "tags": ["Accounts"],
-        "summary": "Create savings account for currency",
-        "security": [{ "bearerAuth": [] }],
-        "responses": { "200": { "description": "Account created" }, "400": { "description": "Bad request" }, "500": { "description": "Server error" } }
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Open savings, generate virtual IBAN, register IBAN+EMAIL on Payment Hub",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "productId"
+                ],
+                "properties": {
+                  "productId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fineract savings account"
+          }
+        }
+      }
+    },
+    "/api/account/deposit": {
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Credit savings (used by Stripe webhook). No Keycloak protect in current code.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DepositRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing fields"
+          }
+        }
       }
     },
     "/api/product": {
       "get": {
-        "tags": ["Product"],
-        "summary": "Get currency products",
-        "security": [{ "bearerAuth": [] }],
-        "responses": { "200": { "description": "Products" }, "500": { "description": "Server error" } }
+        "tags": [
+          "Product"
+        ],
+        "summary": "Savings products; userSubscriptionEnabled if caller has an account. Auth middleware not applied.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CurrencyProduct"
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/beneficiary": {
       "get": {
-        "tags": ["Beneficiary"],
-        "summary": "List beneficiaries",
-        "security": [{ "bearerAuth": [] }],
-        "responses": { "200": { "description": "Beneficiaries" }, "500": { "description": "Server error" } }
+        "tags": [
+          "Beneficiary"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Fineract datatable beneficiaries_client",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Datatable rows"
+          }
+        }
       },
       "post": {
-        "tags": ["Beneficiary"],
-        "summary": "Add beneficiary",
-        "security": [{ "bearerAuth": [] }],
-        "responses": { "200": { "description": "Added" }, "400": { "description": "Validation error" }, "500": { "description": "Server error" } }
-      },
+        "tags": [
+          "Beneficiary"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Insert beneficiary row",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/api/beneficiary/{id}": {
       "delete": {
-        "tags": ["Beneficiary"],
-        "summary": "Delete beneficiary",
-        "security": [{ "bearerAuth": [] }],
-        "responses": { "200": { "description": "Deleted" }, "500": { "description": "Server error" } }
+        "tags": [
+          "Beneficiary"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete datatable row",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          }
+        }
       }
     },
     "/api/transfer/request": {
       "post": {
-        "tags": ["Transfer"],
-        "summary": "Transfer request",
-        "security": [{ "bearerAuth": [] }],
-        "responses": { "200": { "description": "OK" }, "500": { "description": "Server error" } }
+        "tags": [
+          "Transfer"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "POST Payment Hub /channel/transfer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Channel response"
+          },
+          "500": {
+            "description": "Failed"
+          }
+        }
+      }
+    },
+    "/api/kyc": {
+      "post": {
+        "tags": [
+          "KYC"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Not implemented",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/kyc/onboarding": {
       "post": {
-        "tags": ["KYC"],
-        "summary": "KYC onboarding webhook",
-        "responses": { "200": { "description": "OK" }, "500": { "description": "Server error" } }
-      }
-    },
-    "/health": {
-      "get": {
-        "summary": "Health check",
-        "responses": { "200": { "description": "OK" } }
+        "tags": [
+          "KYC"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ballerine workflow.completed webhook → Keycloak register + Fineract client/savings",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventName": {
+                    "type": "string",
+                    "example": "workflow.completed"
+                  },
+                  "workflowStatus": {
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Onboarded"
+          }
+        }
       }
     }
   }

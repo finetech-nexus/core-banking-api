@@ -178,6 +178,15 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
 }
  */
 
+function nonBlank(...values: Array<unknown>): string | null {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return null;
+}
+
 route.post("/onboarding",keycloakProtect, async (req: any, res: Response) => {
 
    //res.status(200).json({ received: true }); 
@@ -187,6 +196,7 @@ route.post("/onboarding",keycloakProtect, async (req: any, res: Response) => {
     const payload = req.body;
     //console.log(JSON.stringify(payload))
     const documents = payload.data.documents || [];
+    const entity = payload.data?.entity?.data || {};
 
     // Find the first approved proof_of_identity document
     const identityDoc = documents.find(
@@ -194,16 +204,18 @@ route.post("/onboarding",keycloakProtect, async (req: any, res: Response) => {
         doc.category === "proof_of_identity" &&
         doc.decision?.status === "approved"
     );
-    // Extract properties safely
+    // Prefer OCR document properties, then the entity data captured at KYC start.
     const props = identityDoc?.properties || {};
+    const firstName = nonBlank(props.firstName, entity.firstName);
+    const lastName = nonBlank(props.lastName, entity.lastName);
     const body = {
-         gender: props.sex?.trim() || null,
-         first_name: props.firstName?.trim() || null,
-         last_name: props.lastName?.trim() || null,
-         birthday: props.dateOfBirth?.trim() || payload.data.entity.data.dateOfBirth,
-         phone_number: payload.data.entity.data.phone || null,
-         email: payload.data.entity.data.email || null,
-         nationality: payload.data.entity.data.country  ? [payload.data.entity.data.country] : [], //todo
+         gender: nonBlank(props.sex, entity.gender, entity.sex),
+         first_name: firstName,
+         last_name: lastName,
+         birthday: nonBlank(props.dateOfBirth, entity.dateOfBirth),
+         phone_number: nonBlank(entity.phone, entity.phoneNumber),
+         email: nonBlank(entity.email),
+         nationality: entity.country  ? [entity.country] : [], //todo
          address: " ", //TODO
          postalCode: " ",//TODO
          city: " ", //TODO
@@ -250,12 +262,12 @@ route.post("/onboarding",keycloakProtect, async (req: any, res: Response) => {
       //CB
   //TODO
     const params = {
-        gender: props.sex?.trim() || null,
-        firstName: props.firstName?.trim() || null,
-        lastName: props.lastName?.trim() || null,
-        dob: props.dateOfBirth?.trim() || payload.data.entity.data.dateOfBirth,
-        phone: payload.data.entity.data.phone || null,
-        email: payload.data.entity.data.email || null,
+        gender: body.gender,
+        firstName,
+        lastName,
+        dob: body.birthday,
+        phone: body.phone_number,
+        email: body.email,
         externalId: result1.data.id,//payload.data.entity.data.externalId || null,
         nationality: payload.data.entity.data.country || null,
         address: null,
