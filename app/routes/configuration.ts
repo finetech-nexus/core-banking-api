@@ -1,26 +1,27 @@
-import { Router, Request, Response, response } from "express";
-
+import { Router, Request, Response } from "express";
 
 export const route = Router();
 /**
-* @swagger
-* tags:
-*   name: Configuration
-*   description: Configuration Client Mobile
-*/
+ * @swagger
+ * tags:
+ *   name: Configuration
+ *   description: Configuration Client Mobile
+ */
 
-route.post(
-  "/",
-  async (request: Request, response: Response) => {
-        //Load Data from .env (configMap)
-      const data = { waiting_post_registraion : 60, 
-                     link_into : '',
-                     default_language :'',
-                     inactivity_delai : 6,
-                     contability_check : 'v1.0.0'
-                     ///Other config App
-                    }
+function mobileConfig() {
+  return {
+    waiting_post_registraion: 60,
+    link_into: "",
+    default_language: "",
+    inactivity_delai: 6,
+    contability_check: "v1.0.0",
+  };
+}
 
-      return response.status(200).json(data)
-  }
-);
+route.get("/", (_request: Request, response: Response) => {
+  return response.status(200).json(mobileConfig());
+});
+
+route.post("/", async (_request: Request, response: Response) => {
+  return response.status(200).json(mobileConfig());
+});

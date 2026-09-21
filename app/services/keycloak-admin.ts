@@ -88,6 +88,23 @@ export const getUserByEmail = async (email: string) => {
   }
 };
 
+export async function findUsersByName(firstName: string, lastName: string) {
+  const access_token = await getAdminAccessToken();
+  const response = await axios.get(
+    `${process.env.KEYCLOAK_URL}/admin/realms/${process.env.KEYCLOAK_REALM}/users`,
+    {
+      headers: { Authorization: `Bearer ${access_token}` },
+      params: {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        exact: true,
+        max: 20,
+      },
+    }
+  );
+  return Array.isArray(response.data) ? response.data : [];
+};
+
 export async function getUserById(userId: string) {
   const access_token = await getAdminAccessToken();
   const response = await axios.get(

@@ -9,6 +9,7 @@ import { route as transferRoute } from "./routes/transfer";
 import { route as exchangeRoute } from "./routes/exchange";
 import { route as statementRoute } from "./routes/statement";
 import { route as agenciesRoute } from "./routes/agencies";
+import { route as contactRoute } from "./routes/contact";
 import { route as kycRoute } from "./routes/kyc";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler";
 import { debugApiLogger } from "./middlewares/debugApiLogger";
@@ -70,6 +71,7 @@ app.use("/api/transfer", transferRoute);
 app.use("/api/exchange", exchangeRoute);
 app.use("/api/statement", statementRoute);
 app.use("/api/agencies", agenciesRoute);
+app.use("/api/contact", contactRoute);
 app.use("/api/kyc", kycRoute);
 
 app.use(notFoundHandler);

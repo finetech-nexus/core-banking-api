@@ -88,6 +88,27 @@ export async function getClients(externalId: string, tenant?: string) {
   return response.pageItems || [];
 }
 
+export async function searchClientsByName(firstName: string, lastName: string, tenant?: string) {
+  const token = await getFineractAccessToken();
+  const authToken = "Bearer " + token;
+  const displayName = `${firstName} ${lastName}`.trim();
+  const response = await makeRequest({
+    method: "GET",
+    endpoint: `/clients?displayName=${encodeURIComponent(displayName)}&limit=50&offset=0`,
+    auth: authToken,
+    tenant,
+  });
+  const items = Array.isArray((response as any)?.pageItems) ? (response as any).pageItems : [];
+  const first = firstName.trim().toLowerCase();
+  const last = lastName.trim().toLowerCase();
+  return items.filter((client: any) => {
+    const given = String(client.firstname || client.firstName || "").trim().toLowerCase();
+    const family = String(client.lastname || client.lastName || "").trim().toLowerCase();
+    if (given && family) return given === first && family === last;
+    return String(client.displayName || "").trim().toLowerCase() === displayName.toLowerCase();
+  });
+}
+
 export async function getClient(clientId: string, tenant?: string) {
   // 0. get Fineract token 
   const token = await getFineractAccessToken(); 
