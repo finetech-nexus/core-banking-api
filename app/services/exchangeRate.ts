@@ -9,8 +9,25 @@ const DEFAULT_RATES: Record<string, number> = {
   USD_TND: 3.08,
 };
 
+const SYMBOL_TO_CODE: Record<string, string> = {
+  "€": "EUR",
+  $: "USD",
+  "£": "GBP",
+  DT: "TND",
+};
+
+export function toCurrencyCode(value: string | undefined | null): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (SYMBOL_TO_CODE[raw]) return SYMBOL_TO_CODE[raw];
+  const upper = raw.toUpperCase();
+  if (SYMBOL_TO_CODE[upper]) return SYMBOL_TO_CODE[upper];
+  const compact = raw.replace(/[^A-Za-z]/g, "").toUpperCase();
+  return compact.length === 3 ? compact : upper;
+}
+
 function pairKey(from: string, to: string): string {
-  return `${from.toUpperCase()}_${to.toUpperCase()}`;
+  return `${from}_${to}`;
 }
 
 function loadConfiguredRates(): Record<string, number> {
@@ -35,8 +52,8 @@ function loadConfiguredRates(): Record<string, number> {
 }
 
 export function getQuoteRate(fromCurrency: string, toCurrency: string): number {
-  const from = (fromCurrency || "").toUpperCase();
-  const to = (toCurrency || "").toUpperCase();
+  const from = toCurrencyCode(fromCurrency);
+  const to = toCurrencyCode(toCurrency);
   if (!from || !to) return 0;
   if (from === to) return 1;
   const rates = loadConfiguredRates();

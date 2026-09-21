@@ -5,6 +5,8 @@ import { onboardUser } from "../services/coreBankingProcessor";
 import { getAdminAccessToken, getGlobalAdminAccessToken,getUserByEmail } from "../services/keycloak-admin";
 import axios from "axios";
 import { logger } from "../logger";
+import { isExchangeCurrencyWebhook } from "../services/ballerineExchange";
+import { settleExchangeFromWebhook } from "../services/settleExchange";
 
 export const route = Router();
 
@@ -194,6 +196,10 @@ route.post("/onboarding",keycloakProtect, async (req: any, res: Response) => {
  
   try {
     const payload = req.body;
+    if (isExchangeCurrencyWebhook(payload)) {
+      const result = await settleExchangeFromWebhook(payload);
+      return res.status(200).json({ message: "Exchange review processed", ...result });
+    }
     //console.log(JSON.stringify(payload))
     const documents = payload.data.documents || [];
     const entity = payload.data?.entity?.data || {};

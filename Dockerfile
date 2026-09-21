@@ -21,6 +21,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=builder /usr/src/app/dist ./dist
 # server.ts loads swagger doc from ../openapi.json at runtime.
 COPY --from=builder /usr/src/app/openapi.json ./openapi.json
+COPY --from=builder /usr/src/app/data ./data
 
 EXPOSE 3000
 

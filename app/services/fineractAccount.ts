@@ -268,3 +268,67 @@ export async function debitAccount(
   logger.info("Debit successful", { accountId });
   return response;
 }
+
+export async function holdAmount(
+  accountId: string,
+  amount: number,
+  reason: string,
+  tenant?: string
+) {
+  if (amount <= 0) throw new Error("Invalid hold amount");
+  const token = await getFineractAccessToken();
+  const authToken = `Bearer ${token}`;
+  const payload = {
+    transactionDate: new Date().toISOString().split("T")[0],
+    dateFormat: "yyyy-MM-dd",
+    locale: "fr",
+    transactionAmount: amount,
+    reasonForBlock: reason || "FX review",
+    lienAllowed: false,
+  };
+  logger.info("Hold amount", { accountId, amount });
+  const response = await makeRequest({
+    method: "POST",
+    endpoint: `/savingsaccounts/${accountId}/transactions?command=holdAmount`,
+    data: payload,
+    auth: authToken,
+    tenant,
+  });
+  if ((response as any).error) {
+    logger.error("Error holding amount", { accountId, response });
+    throw new Error("Fineract hold failed");
+  }
+  return response;
+}
+
+export async function releaseAmount(
+  accountId: string,
+  holdTransactionId: string,
+  tenant?: string
+) {
+  const token = await getFineractAccessToken();
+  const authToken = `Bearer ${token}`;
+  logger.info("Release amount", { accountId, holdTransactionId });
+  const response = await makeRequest({
+    method: "POST",
+    endpoint: `/savingsaccounts/${accountId}/transactions/${holdTransactionId}?command=releaseAmount`,
+    data: { isBulk: false },
+    auth: authToken,
+    tenant,
+  });
+  if ((response as any).error) {
+    logger.error("Error releasing amount", { accountId, holdTransactionId, response });
+    throw new Error("Fineract release failed");
+  }
+  return response;
+}
+
+export function parseFineractDate(value: unknown): Date | null {
+  if (value == null) return null;
+  if (Array.isArray(value) && value.length >= 3) {
+    const d = new Date(Date.UTC(Number(value[0]), Number(value[1]) - 1, Number(value[2])));
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(value as string);
+  return Number.isNaN(d.getTime()) ? null : d;
+}

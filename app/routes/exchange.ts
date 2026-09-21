@@ -1,8 +1,17 @@
 import { Router, Response } from "express";
 import { keycloakProtect } from "../middlewares/keycloakProtect";
 import { getClients } from "../services/fineractClient";
-import { creditAccount, debitAccount, getAccounts } from "../services/fineractAccount";
-import { getQuoteRate, roundMoney } from "../services/exchangeRate";
+import {
+  creditAccount,
+  debitAccount,
+  getAccounts,
+  holdAmount,
+  releaseAmount,
+} from "../services/fineractAccount";
+import { getQuoteRate, roundMoney, toCurrencyCode } from "../services/exchangeRate";
+import { isTunisiaOutboundFx, savePendingExchange } from "../services/pendingExchange";
+import { startExchangeCurrencyWorkflow } from "../services/ballerineExchange";
+import { settleExchangeFromWebhook } from "../services/settleExchange";
 import { logger } from "../logger";
 
 export const route = Router();
@@ -106,14 +115,48 @@ route.post("/credit", keycloakProtect, async (req: any, res: Response) => {
   }
 });
 
+route.post("/internal-credit", async (req: any, res: Response) => {
+  const secret = process.env.EXCHANGE_SETTLE_SECRET || "";
+  if (!secret || req.headers["x-exchange-settle-secret"] !== secret) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  const tenantId = req.headers["fineract-platform-tenantid"];
+  const userId = String(req.body?.userId || "");
+  const savingsAccountId = String(req.body?.savingsAccountId || "");
+  const amount = Number(req.body?.amount);
+  const note = String(req.body?.note || "Currency exchange credit");
+  if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
+  if (!userId) return res.status(401).json({ error: "userId is required" });
+  if (!savingsAccountId || !Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ error: "savingsAccountId and amount are required" });
+  }
+  try {
+    const owned = await findOwnedSavings(userId, savingsAccountId, tenantId);
+    if (!owned) return res.status(404).json({ error: "Savings account not found" });
+    const data = await creditAccount(
+      savingsAccountId,
+      owned.account.accountNo,
+      PAYMENT_TYPE_ID,
+      `fx-in-${Date.now()}`,
+      roundMoney(amount),
+      note,
+      tenantId
+    );
+    return res.json({ ok: true, savingsAccountId, amount: roundMoney(amount), data });
+  } catch (err: any) {
+    logger.error("POST /exchange/internal-credit failed", { message: err?.message });
+    return res.status(500).json({ error: "Exchange credit failed", details: err?.message });
+  }
+});
+
 route.post("/", keycloakProtect, async (req: any, res: Response) => {
   const tenantId = req.headers["fineract-platform-tenantid"];
   const userId = req.userInfo?.sub;
   const fromAccountId = String(req.body?.fromAccountId || "");
   const toAccountId = String(req.body?.toAccountId || "");
   const amount = Number(req.body?.amount);
-  const fromCurrency = String(req.body?.fromCurrency || "").toUpperCase();
-  const toCurrency = String(req.body?.toCurrency || "").toUpperCase();
+  const fromCurrency = toCurrencyCode(String(req.body?.fromCurrency || ""));
+  const toCurrency = toCurrencyCode(String(req.body?.toCurrency || ""));
 
   if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
   if (!userId) return res.status(401).json({ error: "invalid user from token" });
@@ -125,19 +168,117 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
   }
 
   const fromOwned = await findOwnedSavings(userId, fromAccountId, tenantId);
-  const toOwned = await findOwnedSavings(userId, toAccountId, tenantId);
-  if (!fromOwned || !toOwned) {
+  const toOwned = toAccountId
+    ? await findOwnedSavings(userId, toAccountId, tenantId)
+    : null;
+  if (!fromOwned) {
     return res.status(404).json({ error: "Account not found on this tenant" });
   }
 
-  const fromCode = fromCurrency || fromOwned.account.currency?.code || fromOwned.account.currency;
-  const toCode = toCurrency || toOwned.account.currency?.code || toOwned.account.currency;
+  const fromCode = fromCurrency || toCurrencyCode(fromOwned.account.currency?.code || fromOwned.account.currency);
+  const toCode =
+    toCurrency ||
+    toCurrencyCode(toOwned?.account.currency?.code || toOwned?.account.currency || "");
   const rate = Number(req.body?.rate) || getQuoteRate(String(fromCode), String(toCode));
   if (!rate) {
     return res.status(404).json({ error: "No rate for currency pair" });
   }
   const converted = roundMoney(amount * rate);
   const debitAmount = roundMoney(amount);
+  const toAmount = Number(req.body?.toAmount) > 0 ? roundMoney(Number(req.body.toAmount)) : converted;
+
+  if (isTunisiaOutboundFx(fromCode, toCode)) {
+    const doc = req.body?.document || {};
+    const base64 = String(doc.base64 || req.body?.documentBase64 || "").replace(
+      /^data:[^;]+;base64,/,
+      ""
+    );
+    if (!base64) {
+      return res.status(400).json({
+        error: "DOCUMENT_REQUIRED",
+        message: "A supporting document is required to exchange TND to another currency",
+      });
+    }
+
+    let holdTransactionId = "";
+    try {
+      const hold = await holdAmount(
+        fromAccountId,
+        debitAmount,
+        String(req.body?.note || "FX review DGCE"),
+        tenantId
+      );
+      holdTransactionId = String(hold?.resourceId || hold?.id || "");
+      if (!holdTransactionId) {
+        throw new Error("Hold did not return a transaction id");
+      }
+
+      const started = await startExchangeCurrencyWorkflow({
+        userId,
+        email: req.body?.email,
+        firstName: req.body?.firstName,
+        lastName: req.body?.lastName,
+        phone: req.body?.phone,
+        fromAccountId,
+        toAccountId,
+        amount: debitAmount,
+        toAmount,
+        rate,
+        fromCurrency: fromCode,
+        toCurrency: toCode,
+        holdTransactionId,
+        note: req.body?.note,
+        document: {
+          base64,
+          mimeType: doc.mimeType || req.body?.documentMimeType,
+          fileName: doc.fileName || req.body?.documentFileName,
+        },
+      });
+
+      savePendingExchange({
+        workflowRuntimeId: started.workflowRuntimeId,
+        userId,
+        fromAccountId,
+        toAccountId,
+        fromAccountNo: fromOwned.account.accountNo,
+        toAccountNo: toOwned?.account.accountNo,
+        amount: debitAmount,
+        toAmount,
+        rate,
+        fromCurrency: fromCode,
+        toCurrency: toCode,
+        holdTransactionId,
+        toTenantId: req.body?.toTenantId,
+        settleCallbackUrl: req.body?.settleCallbackUrl,
+        note: req.body?.note,
+        createdAt: new Date().toISOString(),
+      });
+
+      return res.json({
+        ok: true,
+        status: "pending_review",
+        workflowRuntimeId: started.workflowRuntimeId,
+        holdTransactionId,
+        fromAmount: debitAmount,
+        toAmount,
+        rate,
+      });
+    } catch (err: any) {
+      logger.error("TN FX review start failed", { message: err?.message });
+      if (holdTransactionId) {
+        try {
+          await releaseAmount(fromAccountId, holdTransactionId, tenantId);
+        } catch (relErr: any) {
+          logger.error("TN FX hold release after failure", { message: relErr?.message });
+        }
+      }
+      return res.status(500).json({ error: "Could not start exchange review", details: err?.message });
+    }
+  }
+
+  if (!toOwned) {
+    return res.status(404).json({ error: "Account not found on this tenant" });
+  }
 
   try {
     const outReceipt = `fx-${Date.now()}-out`;
@@ -157,16 +298,17 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
         toOwned.account.accountNo,
         PAYMENT_TYPE_ID,
         inReceipt,
-        converted,
+        toAmount,
         `FX from ${fromAccountId}`,
         tenantId
       );
       return res.json({
         ok: true,
+        status: "completed",
         fromAccountId,
         toAccountId,
         fromAmount: debitAmount,
-        toAmount: converted,
+        toAmount,
         rate,
         debit,
         credit,
@@ -191,5 +333,15 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
   } catch (err: any) {
     logger.error("POST /exchange failed", { message: err?.message });
     return res.status(500).json({ error: "Exchange failed", details: err?.message });
+  }
+});
+
+route.post("/webhook", keycloakProtect, async (req: any, res: Response) => {
+  try {
+    const result = await settleExchangeFromWebhook(req.body);
+    return res.json(result);
+  } catch (err: any) {
+    logger.error("POST /exchange/webhook failed", { message: err?.message });
+    return res.status(500).json({ error: "Exchange webhook failed", details: err?.message });
   }
 });

@@ -39,6 +39,9 @@
       "name": "Exchange"
     },
     {
+      "name": "Agencies"
+    },
+    {
       "name": "KYC"
     }
   ],
@@ -1167,6 +1170,26 @@
                   },
                   "toCurrency": {
                     "type": "string"
+                  },
+                  "toTenantId": {
+                    "type": "string"
+                  },
+                  "settleCallbackUrl": {
+                    "type": "string"
+                  },
+                  "document": {
+                    "type": "object",
+                    "properties": {
+                      "base64": {
+                        "type": "string"
+                      },
+                      "mimeType": {
+                        "type": "string"
+                      },
+                      "fileName": {
+                        "type": "string"
+                      }
+                    }
                   }
                 }
               }
@@ -1175,7 +1198,87 @@
         },
         "responses": {
           "200": {
-            "description": "Converted"
+            "description": "Converted immediately, or pending_review with Fineract hold + Ballerine exchange_currency workflow"
+          }
+        }
+      }
+    },
+    "/api/exchange/webhook": {
+      "post": {
+        "tags": [
+          "Exchange"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ballerine workflow.completed for exchange_currency: release hold, debit, credit or rollback",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Settled or rolled back"
+          }
+        }
+      }
+    },
+    "/api/exchange/internal-credit": {
+      "post": {
+        "tags": [
+          "Exchange"
+        ],
+        "summary": "Internal destination credit after approved TND FX (x-exchange-settle-secret)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userId",
+                  "savingsAccountId",
+                  "amount"
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string"
+                  },
+                  "savingsAccountId": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "number"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credited"
           }
         }
       }
@@ -1272,6 +1375,79 @@
         "responses": {
           "200": {
             "description": "Credited"
+          }
+        }
+      }
+    },
+    "/api/statement": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Build a statement from Fineract savings transactions for an owned account",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          },
+          {
+            "name": "accountId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Statement JSON"
+          },
+          "404": {
+            "description": "Account not found"
+          }
+        }
+      }
+    },
+    "/api/agencies": {
+      "get": {
+        "tags": [
+          "Agencies"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Agencies for this TENANT from data/agencies.json (or AGENCIES_FILE / AGENCIES_JSON)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ tenantId, agencies: [{ id, tenantId, name, city, address, hours, phone, lat, lng }] }"
           }
         }
       }

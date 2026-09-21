@@ -1,0 +1,101 @@
+[
+  {
+    "id": "tn-tunis-centre",
+    "tenantId": "tn",
+    "name": "Nexus Tunis Centre",
+    "city": "Tunis",
+    "address": "14 Avenue Habib Bourguiba, 1001 Tunis",
+    "hours": "08:30–16:30",
+    "phone": "+216 71 000 100",
+    "lat": 36.7992,
+    "lng": 10.1817
+  },
+  {
+    "id": "tn-lac",
+    "tenantId": "tn",
+    "name": "Nexus Les Berges du Lac",
+    "city": "Tunis",
+    "address": "Immeuble Nexus, Rue du Lac Michigan, 1053 Les Berges du Lac 2",
+    "hours": "08:30–16:30",
+    "phone": "+216 71 000 110",
+    "lat": 36.8348,
+    "lng": 10.2374
+  },
+  {
+    "id": "tn-sfax",
+    "tenantId": "tn",
+    "name": "Nexus Sfax",
+    "city": "Sfax",
+    "address": "Avenue Habib Bourguiba, 3000 Sfax",
+    "hours": "08:30–16:30",
+    "phone": "+216 74 000 120",
+    "lat": 34.7398,
+    "lng": 10.7603
+  },
+  {
+    "id": "tn-sousse",
+    "tenantId": "tn",
+    "name": "Nexus Sousse",
+    "city": "Sousse",
+    "address": "Boulevard de la Corniche, 4000 Sousse",
+    "hours": "08:30–16:30",
+    "phone": "+216 73 000 130",
+    "lat": 35.8256,
+    "lng": 10.637
+  },
+  {
+    "id": "eu-paris",
+    "tenantId": "eu",
+    "name": "Nexus Paris Opéra",
+    "city": "Paris",
+    "address": "12 Rue de la Paix, 75002 Paris",
+    "hours": "09:00–17:30",
+    "phone": "+33 1 84 00 01 00",
+    "lat": 48.8686,
+    "lng": 2.3305
+  },
+  {
+    "id": "eu-brussels",
+    "tenantId": "eu",
+    "name": "Nexus Bruxelles Louise",
+    "city": "Bruxelles",
+    "address": "Avenue Louise 54, 1050 Bruxelles",
+    "hours": "09:00–17:30",
+    "phone": "+32 2 880 01 00",
+    "lat": 50.8265,
+    "lng": 4.365
+  },
+  {
+    "id": "eu-luxembourg",
+    "tenantId": "eu",
+    "name": "Nexus Luxembourg",
+    "city": "Luxembourg",
+    "address": "2 Boulevard Royal, L-2449 Luxembourg",
+    "hours": "09:00–17:00",
+    "phone": "+352 27 00 01 00",
+    "lat": 49.6116,
+    "lng": 6.1296
+  },
+  {
+    "id": "eu-frankfurt",
+    "tenantId": "eu",
+    "name": "Nexus Frankfurt",
+    "city": "Frankfurt",
+    "address": "Goethestraße 26, 60313 Frankfurt am Main",
+    "hours": "09:00–17:30",
+    "phone": "+49 69 900 01 00",
+    "lat": 50.1136,
+    "lng": 8.6784
+  },
+  {
+    "id": "eu-milan",
+    "tenantId": "eu",
+    "name": "Nexus Milano",
+    "city": "Milano",
+    "address": "Via Montenapoleone 8, 20121 Milano",
+    "hours": "09:00–17:30",
+    "phone": "+39 02 9475 0100",
+    "lat": 45.4685,
+    "lng": 9.195
+  }
+]
