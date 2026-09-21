@@ -68,7 +68,7 @@ route.get("/", keycloakProtect, async (req: any, res: Response) => {
               id: t.id,
               amount: t.amount,
               date: t.date,
-              title: t.note,
+              title: t.note || t.reasonForBlock,
               transactionType: t.transactionType?.value || "Transaction",
               entryType: t.entryType,
               currency: t.currency.code,

@@ -44,6 +44,17 @@
     "lng": 10.637
   },
   {
+    "id": "tn-zarzis",
+    "tenantId": "tn",
+    "name": "Nexus Zarzis",
+    "city": "Zarzis",
+    "address": "Avenue Habib Bourguiba, 4170 Zarzis",
+    "hours": "08:30–16:30",
+    "phone": "+216 75 000 140",
+    "lat": 33.504,
+    "lng": 11.1122
+  },
+  {
     "id": "eu-paris",
     "tenantId": "eu",
     "name": "Nexus Paris Opéra",

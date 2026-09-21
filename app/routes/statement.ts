@@ -39,14 +39,16 @@ function isDebit(t: any): boolean {
 
 function lineTitle(t: any): string {
   const note = typeof t?.note === "string" ? t.note.trim() : "";
-  if (note) {
+  const reason = typeof t?.reasonForBlock === "string" ? t.reasonForBlock.trim() : "";
+  const raw = note || reason;
+  if (raw) {
     try {
-      const parsed = JSON.parse(note);
+      const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === "object") {
-        return String(parsed.payee || parsed.payer || parsed.note || note);
+        return String(parsed.payee || parsed.payer || parsed.note || raw);
       }
     } catch {}
-    return note;
+    return raw;
   }
   return String(t?.transactionType?.value || "Transaction");
 }

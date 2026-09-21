@@ -7,6 +7,7 @@ import {
   type PendingExchange,
 } from "./pendingExchange";
 import { isApprovedWorkflow } from "./ballerineExchange";
+import { exchangeLedgerNote } from "./exchangeNote";
 
 const PAYMENT_TYPE_ID = process.env.FINERACT_PAYMENT_TYPE_ID || "1";
 
@@ -58,13 +59,20 @@ export async function settleExchangeFromWebhook(payload: any) {
     return { ok: true, status: "rejected", rolledBack: true };
   }
 
+  const fxMeta = {
+    fromAmount: record.amount,
+    fromCurrency: record.fromCurrency,
+    toAmount: record.toAmount,
+    toCurrency: record.toCurrency,
+    rate: record.rate,
+  };
   const debit = await debitAccount(
     fromAccountId,
     record.fromAccountNo || fromAccountId,
     PAYMENT_TYPE_ID,
     `fx-${workflowRuntimeId}-out`,
     record.amount,
-    `FX to ${record.toAccountId} (approved)`,
+    record.note || exchangeLedgerNote({ ...fxMeta, side: "debit" }),
     tenantId
   );
 
@@ -82,7 +90,7 @@ export async function settleExchangeFromWebhook(payload: any) {
         PAYMENT_TYPE_ID,
         `fx-${workflowRuntimeId}-in`,
         record.toAmount,
-        `FX from ${fromAccountId} (approved)`,
+        exchangeLedgerNote({ ...fxMeta, side: "credit" }),
         tenantId
       );
     } catch (err: any) {
@@ -94,7 +102,7 @@ export async function settleExchangeFromWebhook(payload: any) {
           PAYMENT_TYPE_ID,
           `fx-${workflowRuntimeId}-rev`,
           record.amount,
-          "FX reversal after credit failure",
+          exchangeLedgerNote({ ...fxMeta, side: "reversal" }),
           tenantId
         );
       } catch (revErr: any) {

@@ -9,6 +9,7 @@ import {
   releaseAmount,
 } from "../services/fineractAccount";
 import { getQuoteRate, roundMoney, toCurrencyCode } from "../services/exchangeRate";
+import { exchangeLabel, exchangeLedgerNote } from "../services/exchangeNote";
 import { isTunisiaOutboundFx, savePendingExchange } from "../services/pendingExchange";
 import { startExchangeCurrencyWorkflow } from "../services/ballerineExchange";
 import { settleExchangeFromWebhook } from "../services/settleExchange";
@@ -54,7 +55,23 @@ route.post("/debit", keycloakProtect, async (req: any, res: Response) => {
   const userId = req.userInfo?.sub;
   const savingsAccountId = String(req.body?.savingsAccountId || "");
   const amount = Number(req.body?.amount);
-  const note = String(req.body?.note || "Currency exchange debit");
+  const fromCurrency = toCurrencyCode(String(req.body?.fromCurrency || ""));
+  const toCurrency = toCurrencyCode(String(req.body?.toCurrency || ""));
+  const rate = Number(req.body?.rate) || 0;
+  const toAmount = Number(req.body?.toAmount) > 0 ? roundMoney(Number(req.body.toAmount)) : rate ? roundMoney(amount * rate) : 0;
+  const note = String(
+    req.body?.note ||
+      (fromCurrency && toCurrency && rate
+        ? exchangeLedgerNote({
+            fromAmount: roundMoney(amount),
+            fromCurrency,
+            toAmount,
+            toCurrency,
+            rate,
+            side: "debit",
+          })
+        : "Currency exchange debit")
+  );
 
   if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
   if (!userId) return res.status(401).json({ error: "invalid user from token" });
@@ -87,7 +104,23 @@ route.post("/credit", keycloakProtect, async (req: any, res: Response) => {
   const userId = req.userInfo?.sub;
   const savingsAccountId = String(req.body?.savingsAccountId || "");
   const amount = Number(req.body?.amount);
-  const note = String(req.body?.note || "Currency exchange credit");
+  const fromCurrency = toCurrencyCode(String(req.body?.fromCurrency || ""));
+  const toCurrency = toCurrencyCode(String(req.body?.toCurrency || ""));
+  const rate = Number(req.body?.rate) || 0;
+  const fromAmount = Number(req.body?.fromAmount) > 0 ? roundMoney(Number(req.body.fromAmount)) : 0;
+  const note = String(
+    req.body?.note ||
+      (fromCurrency && toCurrency && rate
+        ? exchangeLedgerNote({
+            fromAmount: fromAmount || (rate ? roundMoney(amount / rate) : amount),
+            fromCurrency,
+            toAmount: roundMoney(amount),
+            toCurrency,
+            rate,
+            side: "credit",
+          })
+        : "Currency exchange credit")
+  );
 
   if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
   if (!userId) return res.status(401).json({ error: "invalid user from token" });
@@ -124,7 +157,23 @@ route.post("/internal-credit", async (req: any, res: Response) => {
   const userId = String(req.body?.userId || "");
   const savingsAccountId = String(req.body?.savingsAccountId || "");
   const amount = Number(req.body?.amount);
-  const note = String(req.body?.note || "Currency exchange credit");
+  const fromCurrency = toCurrencyCode(String(req.body?.fromCurrency || ""));
+  const toCurrency = toCurrencyCode(String(req.body?.toCurrency || ""));
+  const rate = Number(req.body?.rate) || 0;
+  const fromAmount = Number(req.body?.fromAmount) > 0 ? roundMoney(Number(req.body.fromAmount)) : 0;
+  const note = String(
+    req.body?.note ||
+      (fromCurrency && toCurrency && rate
+        ? exchangeLedgerNote({
+            fromAmount: fromAmount || (rate ? roundMoney(amount / rate) : amount),
+            fromCurrency,
+            toAmount: roundMoney(amount),
+            toCurrency,
+            rate,
+            side: "credit",
+          })
+        : "Currency exchange credit")
+  );
   if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
   if (!userId) return res.status(401).json({ error: "userId is required" });
   if (!savingsAccountId || !Number.isFinite(amount) || amount <= 0) {
@@ -186,6 +235,17 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
   const converted = roundMoney(amount * rate);
   const debitAmount = roundMoney(amount);
   const toAmount = Number(req.body?.toAmount) > 0 ? roundMoney(Number(req.body.toAmount)) : converted;
+  const fxMeta = {
+    fromAmount: debitAmount,
+    fromCurrency: String(fromCode),
+    toAmount,
+    toCurrency: String(toCode),
+    rate,
+  };
+  const debitNote = exchangeLedgerNote({ ...fxMeta, side: "debit" });
+  const creditNote = exchangeLedgerNote({ ...fxMeta, side: "credit" });
+  const holdNote = exchangeLabel({ ...fxMeta, side: "hold" });
+  const reversalNote = exchangeLedgerNote({ ...fxMeta, side: "reversal" });
 
   if (isTunisiaOutboundFx(fromCode, toCode)) {
     const doc = req.body?.document || {};
@@ -205,7 +265,7 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
       const hold = await holdAmount(
         fromAccountId,
         debitAmount,
-        String(req.body?.note || "FX review DGCE"),
+        holdNote,
         tenantId
       );
       holdTransactionId = String(hold?.resourceId || hold?.id || "");
@@ -250,7 +310,7 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
         holdTransactionId,
         toTenantId: req.body?.toTenantId,
         settleCallbackUrl: req.body?.settleCallbackUrl,
-        note: req.body?.note,
+        note: req.body?.note || debitNote,
         createdAt: new Date().toISOString(),
       });
 
@@ -289,7 +349,7 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
       PAYMENT_TYPE_ID,
       outReceipt,
       debitAmount,
-      `FX to ${toAccountId}`,
+      debitNote,
       tenantId
     );
     try {
@@ -299,7 +359,7 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
         PAYMENT_TYPE_ID,
         inReceipt,
         toAmount,
-        `FX from ${fromAccountId}`,
+        creditNote,
         tenantId
       );
       return res.json({
@@ -322,7 +382,7 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
           PAYMENT_TYPE_ID,
           `${outReceipt}-rev`,
           debitAmount,
-          "FX reversal",
+          reversalNote,
           tenantId
         );
       } catch (revErr: any) {
