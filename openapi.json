@@ -36,6 +36,9 @@
       "name": "Transfer"
     },
     {
+      "name": "Exchange"
+    },
+    {
       "name": "KYC"
     }
   ],
@@ -821,6 +824,75 @@
         }
       }
     },
+    "/api/account/profile": {
+      "patch": {
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update phone/email on tenant Keycloak and Fineract client",
+        "description": "Looks up the Fineract client by JWT `sub` as `externalId`. Updates tenant Keycloak contact fields, then PUT `/clients/{id}` with emailAddress/mobileNo. Called by nexus-bank-api after OTP verification.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "phone": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "clients": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing tenant header or contact field"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Client not found"
+          }
+        }
+      }
+    },
     "/api/account/deposit": {
       "post": {
         "tags": [
@@ -1007,6 +1079,199 @@
           },
           "500": {
             "description": "Failed"
+          }
+        }
+      }
+    },
+    "/api/exchange/rate": {
+      "get": {
+        "tags": [
+          "Exchange"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "FX quote (EXCHANGE_RATES env JSON, else built-in EUR/TND/USD)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ from, to, rate, quotedAt }"
+          }
+        }
+      }
+    },
+    "/api/exchange": {
+      "post": {
+        "tags": [
+          "Exchange"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Same-tenant FX: Fineract withdrawal then deposit",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fromAccountId",
+                  "toAccountId",
+                  "amount"
+                ],
+                "properties": {
+                  "fromAccountId": {
+                    "type": "string"
+                  },
+                  "toAccountId": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "number"
+                  },
+                  "rate": {
+                    "type": "number"
+                  },
+                  "fromCurrency": {
+                    "type": "string"
+                  },
+                  "toCurrency": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Converted"
+          }
+        }
+      }
+    },
+    "/api/exchange/debit": {
+      "post": {
+        "tags": [
+          "Exchange"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Withdraw from savings (cross-tenant FX debit hop)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "savingsAccountId",
+                  "amount"
+                ],
+                "properties": {
+                  "savingsAccountId": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "number"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Debited"
+          }
+        }
+      }
+    },
+    "/api/exchange/credit": {
+      "post": {
+        "tags": [
+          "Exchange"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Deposit to savings (cross-tenant FX credit hop)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FineractTenant"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "savingsAccountId",
+                  "amount"
+                ],
+                "properties": {
+                  "savingsAccountId": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "number"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credited"
           }
         }
       }

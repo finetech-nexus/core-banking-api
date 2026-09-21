@@ -102,6 +102,39 @@ export async function getClient(clientId: string, tenant?: string) {
   return response;
 }
 
+/**
+ * Update Fineract client contact fields. firstname/lastname are required by Fineract PUT /clients.
+ */
+export async function updateClientContact(
+  clientId: string | number,
+  payload: { firstname: string; lastname: string; email?: string; phone?: string },
+  tenant?: string
+) {
+  const token = await getFineractAccessToken();
+  const data: Record<string, unknown> = {
+    firstname: payload.firstname,
+    lastname: payload.lastname,
+    locale: "fr",
+    dateFormat: "yyyy-MM-dd",
+  };
+  if (payload.email !== undefined) data.emailAddress = payload.email;
+  if (payload.phone !== undefined) data.mobileNo = payload.phone;
+
+  const response = await makeRequest({
+    method: "PUT",
+    endpoint: `/clients/${clientId}`,
+    data,
+    auth: "Bearer " + token,
+    tenant,
+  });
+
+  if ((response as any).error) {
+    logger.error("Error PUT /clients", { clientId, message: (response as any).message });
+    throw response;
+  }
+  return response;
+}
+
 export async function createBeneficiary(clientId: string, tenantId?: string, beneficiary?: any) {
   // 0. get Fineract token 
   const token = await getFineractAccessToken(); 

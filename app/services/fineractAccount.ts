@@ -221,3 +221,50 @@ export async function creditAccount(
   logger.info("Credit successful", { accountId });
   return response;
 }
+
+/**
+ * Debit a savings account (withdrawal). Used for FX / exchange.
+ */
+export async function debitAccount(
+  accountId: string,
+  accountNumber: string,
+  paymentTypeId: string,
+  receiptNumber: string,
+  amount: number,
+  note: string,
+  tenant?: string
+) {
+  if (!accountNumber || amount <= 0) {
+    throw new Error("Invalid accountNumber or amount");
+  }
+
+  const token = await getFineractAccessToken();
+  const authToken = `Bearer ${token}`;
+  const payload = {
+    transactionDate: new Date().toISOString().split("T")[0],
+    dateFormat: "yyyy-MM-dd",
+    locale: "fr",
+    transactionAmount: amount,
+    accountNumber,
+    paymentTypeId,
+    receiptNumber,
+    note,
+  };
+
+  logger.info("Debit account", { accountId, amount });
+  const response = await makeRequest({
+    method: "POST",
+    endpoint: `/savingsaccounts/${accountId}/transactions?command=withdrawal`,
+    data: payload,
+    auth: authToken,
+    tenant,
+  });
+
+  if ((response as any).error) {
+    logger.error("Error debiting account", { accountId, response });
+    throw new Error("Fineract debit failed");
+  }
+
+  logger.info("Debit successful", { accountId });
+  return response;
+}

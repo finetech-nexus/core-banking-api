@@ -6,6 +6,7 @@ import { route as accountRoute } from "./routes/account";
 import { route as productRoute } from "./routes/product";
 import { route as beneficiaryRoute } from "./routes/beneficiary";
 import { route as transferRoute } from "./routes/transfer";
+import { route as exchangeRoute } from "./routes/exchange";
 import { route as kycRoute } from "./routes/kyc";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler";
 import { debugApiLogger } from "./middlewares/debugApiLogger";
@@ -64,6 +65,7 @@ app.use("/api/account", accountRoute);
 app.use("/api/product", productRoute);
 app.use("/api/beneficiary", beneficiaryRoute);
 app.use("/api/transfer", transferRoute);
+app.use("/api/exchange", exchangeRoute);
 app.use("/api/kyc", kycRoute);
 
 app.use(notFoundHandler);

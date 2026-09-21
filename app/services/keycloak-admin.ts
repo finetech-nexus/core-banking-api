@@ -87,3 +87,47 @@ export const getUserByEmail = async (email: string) => {
     throw error;
   }
 };
+
+export async function getUserById(userId: string) {
+  const access_token = await getAdminAccessToken();
+  const response = await axios.get(
+    `${process.env.KEYCLOAK_URL}/admin/realms/${process.env.KEYCLOAK_REALM}/users/${userId}`,
+    { headers: { Authorization: `Bearer ${access_token}` } }
+  );
+  return response.data;
+}
+
+export async function updateUserContact(
+  userId: string,
+  patch: { email?: string; phone?: string }
+) {
+  const user = await getUserById(userId);
+  const attributes = { ...(user.attributes || {}) };
+  if (patch.phone !== undefined) {
+    attributes.phone_number = [patch.phone];
+    attributes.verified_phone_number = ["true"];
+  }
+  const emailChanged =
+    patch.email !== undefined &&
+    String(patch.email).trim().toLowerCase() !== String(user.email ?? "").trim().toLowerCase();
+
+  const access_token = await getAdminAccessToken();
+  await axios.put(
+    `${process.env.KEYCLOAK_URL}/admin/realms/${process.env.KEYCLOAK_REALM}/users/${userId}`,
+    {
+      username: user.username,
+      enabled: user.enabled,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: patch.email !== undefined ? patch.email : user.email,
+      emailVerified: emailChanged ? false : user.emailVerified,
+      attributes,
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${access_token}`,
+      },
+    }
+  );
+}

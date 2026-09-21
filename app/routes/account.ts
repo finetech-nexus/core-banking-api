@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 
 import { makeRequest } from "../middlewares/fineractRequest";
 import { body, validationResult } from "express-validator";
-import { getAdminAccessToken, getUserByEmail } from "../services/keycloak-admin";
+import { getAdminAccessToken, getUserByEmail, getFineractAccessToken, updateUserContact } from "../services/keycloak-admin";
 import axios from "axios";
 import { keycloakProtect } from "../middlewares/keycloakProtect";
 import jwt from "jsonwebtoken";
@@ -11,9 +11,8 @@ import registrationValidator from "../validators/registration-validator";
 import resetPasswordValidator from "../validators/reset-password-validator";
 import { partyRegistration } from '../services/paymentService';
 import { assignIBAN , generateIBAN, createIBANTable} from '../services/assignIBAN';
-import { getFineractAccessToken } from "../services/keycloak-admin";
 
-import { getClient, getClients } from "../services/fineractClient";
+import { getClient, getClients, updateClientContact } from "../services/fineractClient";
 import { getAccounts, getTransactions, creditAccount, createSavingsAccountWithPolling } from "../services/fineractAccount";
 import { logger } from "../logger";
 
@@ -107,6 +106,84 @@ route.get("/", keycloakProtect, async (req: any, res: Response) => {
     return res.status(500).json({
       error: "Could not fetch /accounts",
       details: err.message,
+    });
+  }
+});
+
+/**
+ * PATCH /profile — update phone/email on tenant Keycloak and Fineract client
+ * (looked up by JWT sub as Fineract externalId).
+ */
+route.patch("/profile", keycloakProtect, async (req: any, res: Response) => {
+  const tenantId = req.headers["fineract-platform-tenantid"];
+  const userId = req.userInfo?.sub;
+  const emailRaw = typeof req.body?.email === "string" ? req.body.email.trim() : undefined;
+  const phoneRaw = typeof req.body?.phone === "string" ? req.body.phone.trim() : undefined;
+
+  if (!tenantId) {
+    return res.status(400).json({ error: "Missing Fineract headers" });
+  }
+  if (!userId) {
+    return res.status(401).json({ error: "invalid user from token" });
+  }
+  if (!emailRaw && !phoneRaw) {
+    return res.status(400).json({ error: "email or phone is required" });
+  }
+
+  logger.debug("PATCH /account/profile", { userId, tenantId, hasEmail: !!emailRaw, hasPhone: !!phoneRaw });
+
+  try {
+    try {
+      await updateUserContact(userId, { email: emailRaw, phone: phoneRaw });
+    } catch (kcErr: any) {
+      const status = kcErr?.response?.status;
+      if (status === 404) {
+        logger.warn("Tenant Keycloak user not found for profile update", { userId, tenantId });
+      } else {
+        throw kcErr;
+      }
+    }
+
+    const clients = await getClients(userId, tenantId);
+    if (!Array.isArray(clients) || clients.length === 0) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    const updated = await Promise.all(
+      clients.map(async (client: any) => {
+        const firstname =
+          client.firstname ||
+          String(client.displayName || "").split(/\s+/)[0] ||
+          "Client";
+        const lastname =
+          client.lastname ||
+          String(client.displayName || "").split(/\s+/).slice(1).join(" ") ||
+          "User";
+        await updateClientContact(
+          client.id,
+          {
+            firstname,
+            lastname,
+            email: emailRaw,
+            phone: phoneRaw,
+          },
+          tenantId
+        );
+        return { clientId: client.id };
+      })
+    );
+
+    return res.json({ ok: true, clients: updated });
+  } catch (err: any) {
+    logger.error("PATCH /account/profile failed", {
+      userId,
+      tenantId,
+      message: err?.message,
+      details: err?.response?.data || err?.message,
+    });
+    return res.status(500).json({
+      error: "Could not update profile",
+      details: err?.response?.data || err?.message,
     });
   }
 });
