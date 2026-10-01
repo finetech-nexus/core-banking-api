@@ -13,10 +13,42 @@ import { partyRegistration } from '../services/paymentService';
 import { assignIBAN , generateIBAN, createIBANTable} from '../services/assignIBAN';
 
 import { getClient, getClients, updateClientContact } from "../services/fineractClient";
-import { getAccounts, getTransactions, creditAccount, createSavingsAccountWithPolling } from "../services/fineractAccount";
+import { getAccounts, getTransactions, creditAccount, debitAccount, createSavingsAccountWithPolling, parseFineractDate } from "../services/fineractAccount";
+import { cardLedgerNote, parseCardNote } from "../services/cardNote";
 import { logger } from "../logger";
 
 export const route = Router();
+
+const CARD_PAYMENT_TYPE_ID = process.env.CARD_PAYMENT_TYPE_ID || process.env.FINERACT_PAYMENT_TYPE_ID || "1";
+
+async function findOwnedSavings(userId: string, savingsAccountId: string, tenantId: string) {
+  const clients = await getClients(userId, tenantId);
+  if (!Array.isArray(clients) || clients.length === 0) return null;
+  for (const client of clients) {
+    const accounts = await getAccounts(String(client.id), tenantId);
+    const account = (accounts || []).find((a: any) => String(a.id) === String(savingsAccountId));
+    if (account) return { client, account };
+  }
+  return null;
+}
+
+function isDebit(t: any): boolean {
+  const type = t?.transactionType || {};
+  if (type.withdrawal === true) return true;
+  if (type.deposit === true) return false;
+  const value = String(type.value || t?.entryType || "").toUpperCase();
+  return value.includes("WITHDRAW") || value === "DEBIT";
+}
+
+function transactionTitle(t: any): string {
+  const note = typeof t?.note === "string" ? t.note.trim() : "";
+  const reason = typeof t?.reasonForBlock === "string" ? t.reasonForBlock.trim() : "";
+  const raw = note || reason;
+  if (!raw) return String(t?.transactionType?.value || "Transaction");
+  // Keep structured JSON notes intact so the app can show merchant + card last4 / FX meta.
+  if (raw.startsWith("{")) return raw;
+  return raw;
+}
 
 
 
@@ -68,7 +100,7 @@ route.get("/", keycloakProtect, async (req: any, res: Response) => {
               id: t.id,
               amount: t.amount,
               date: t.date,
-              title: t.note || t.reasonForBlock,
+              title: transactionTitle(t),
               transactionType: t.transactionType?.value || "Transaction",
               entryType: t.entryType,
               currency: t.currency.code,
@@ -277,6 +309,108 @@ route.post("/deposit", async (req: any, res: Response) => {//TODO add security
   } catch (err: any) {
     logger.error("Transaction error", { error: err?.message || err });
     res.status(500).json({ error: "Transaction failed" });
+  }
+});
+
+/**
+ * Debit a savings account for a card authorization.
+ * Note stores cardId so home + card history can attribute the spend to card 1 vs card 2.
+ */
+route.post("/card-spend", keycloakProtect, async (req: any, res: Response) => {
+  const tenantId = req.headers["fineract-platform-tenantid"];
+  const userId = req.userInfo?.sub;
+  const savingsAccountId = String(req.body?.savingsAccountId || req.body?.accountId || "").trim();
+  const amount = Math.abs(Number(req.body?.amount));
+  const merchant = String(req.body?.merchant || "").trim();
+  const cardId = String(req.body?.cardId || "").trim();
+  const last4 = String(req.body?.last4 || "").replace(/\D/g, "").slice(-4);
+  const scheme = String(req.body?.scheme || "").trim();
+  const authId = String(req.body?.authId || req.body?.receiptNumber || "").trim();
+  const paymentTypeId = String(req.body?.paymentTypeId || CARD_PAYMENT_TYPE_ID);
+
+  if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
+  if (!userId) return res.status(401).json({ error: "invalid user from token" });
+  if (!savingsAccountId || !Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ error: "savingsAccountId and amount are required" });
+  }
+  if (!cardId || !merchant) {
+    return res.status(400).json({ error: "cardId and merchant are required" });
+  }
+
+  try {
+    const owned = await findOwnedSavings(userId, savingsAccountId, tenantId);
+    if (!owned) return res.status(404).json({ error: "Savings account not found" });
+    const receipt = authId || `card-${cardId.slice(0, 8)}-${Date.now()}`;
+    const note = cardLedgerNote({ cardId, last4, scheme, merchant, authId: receipt });
+    const data = await debitAccount(
+      savingsAccountId,
+      owned.account.accountNo,
+      paymentTypeId,
+      receipt,
+      amount,
+      note,
+      tenantId
+    );
+    return res.status(201).json({
+      ok: true,
+      savingsAccountId,
+      cardId,
+      amount,
+      receiptNumber: receipt,
+      note,
+      data,
+    });
+  } catch (err: any) {
+    logger.error("POST /account/card-spend failed", { message: err?.message });
+    return res.status(500).json({ error: "Card spend failed", details: err?.message });
+  }
+});
+
+/** Account ledger for card history filters (`cardId` optional). */
+route.get("/transactions", keycloakProtect, async (req: any, res: Response) => {
+  const tenantId = req.headers["fineract-platform-tenantid"];
+  const userId = req.userInfo?.sub;
+  const accountId = String(req.query.accountId || req.query.savingsAccountId || "").trim();
+  const cardId = String(req.query.cardId || "").trim();
+
+  if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
+  if (!userId) return res.status(401).json({ error: "invalid user from token" });
+  if (!accountId) return res.status(400).json({ error: "accountId is required" });
+
+  try {
+    const owned = await findOwnedSavings(userId, accountId, tenantId);
+    if (!owned) return res.status(404).json({ error: "Savings account not found" });
+    const raw = await getTransactions(accountId, tenantId);
+    const transactions = (Array.isArray(raw) ? raw : [])
+      .filter((t: any) => !t?.reversed)
+      .map((t: any) => {
+        const note = typeof t?.note === "string" ? t.note : "";
+        const card = parseCardNote(note);
+        const debit = isDebit(t);
+        const amountAbs = Math.abs(Number(t.amount) || 0);
+        const date = parseFineractDate(t.date) || parseFineractDate(t.submittedOnDate) || new Date();
+        return {
+          id: String(t.id),
+          amount: debit ? -amountAbs : amountAbs,
+          currency: t?.currency?.code || owned.account?.currency?.code,
+          date: date.toISOString(),
+          title: transactionTitle(t),
+          note,
+          cardId: card?.cardId || null,
+          last4: card?.last4 || null,
+          merchant: card?.merchant || null,
+          receiptNumber: t?.paymentDetailData?.receiptNumber || card?.authId || null,
+          transactionType: t?.transactionType?.value || (debit ? "Debit" : "Credit"),
+          entryType: t?.entryType,
+          reversed: Boolean(t?.reversed),
+        };
+      })
+      .filter((t: any) => !cardId || t.cardId === cardId)
+      .sort((a: any, b: any) => String(b.date).localeCompare(String(a.date)));
+    return res.json({ accountId, cardId: cardId || null, transactions });
+  } catch (err: any) {
+    logger.error("GET /account/transactions failed", { message: err?.message });
+    return res.status(500).json({ error: "Could not fetch transactions", details: err?.message });
   }
 });
 

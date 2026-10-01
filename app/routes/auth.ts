@@ -397,9 +397,9 @@ route.post("/token", async (req: Request, res: Response) => {
     params.append("subject_token", subject_token);
 
 
-    console.log(subject_token);
-    console.log(process.env.SUBJECT_ISSUER);
-    console.log(process.env.KEYCLOAK_CLIENT_ID);
+    logger.debug("Keycloak subject token exchange requested", {
+      subjectIssuer: process.env.SUBJECT_ISSUER,
+    });
     const kc_response = await axios.post(url, params, {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
     });
@@ -800,6 +800,5 @@ route.post('/login/magiclink',emailValidator ,async (request:Request, response:R
     return response.status(500).json({ error: 'Failed to send magic link email' });
   }
 });
-
 
 
