@@ -14,6 +14,12 @@ import { assignIBAN , generateIBAN, createIBANTable} from '../services/assignIBA
 
 import { getClient, getClients, updateClientContact } from "../services/fineractClient";
 import { getAccounts, getTransactions, creditAccount, debitAccount, createSavingsAccountWithPolling, parseFineractDate } from "../services/fineractAccount";
+import {
+  applyAndPayChargeByName,
+  attachMonthlyChargeByName,
+  findChargeByName,
+  listCharges,
+} from "../services/fineractCharges";
 import { cardLedgerNote, parseCardNote } from "../services/cardNote";
 import { logger } from "../logger";
 
@@ -414,7 +420,105 @@ route.get("/transactions", keycloakProtect, async (req: any, res: Response) => {
   }
 });
 
+/**
+ * List Fineract charge definitions (admin token via core banking).
+ * Optional ?name= exact match.
+ */
+route.get("/charges", keycloakProtect, async (req: any, res: Response) => {
+  const tenantId = req.headers["fineract-platform-tenantid"];
+  if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
+  try {
+    const name = String(req.query.name || "").trim();
+    if (name) {
+      const charge = await findChargeByName(name, tenantId);
+      return res.json({ charge });
+    }
+    const charges = await listCharges(tenantId);
+    return res.json({ charges });
+  } catch (err: any) {
+    logger.error("GET /account/charges failed", { message: err?.message });
+    return res.status(500).json({ error: "Could not list charges", details: err?.message });
+  }
+});
 
+/**
+ * Book a one-shot fee on the customer's savings account (apply + pay Fineract charge).
+ * Body: { savingsAccountId, chargeName, amount? }
+ * Commercial amount usually comes from produit-api; chargeName is the Fineract definition.
+ */
+route.post("/charges/apply-and-pay", keycloakProtect, async (req: any, res: Response) => {
+  const tenantId = req.headers["fineract-platform-tenantid"];
+  const userId = req.userInfo?.sub;
+  const savingsAccountId = String(req.body?.savingsAccountId || req.body?.accountId || "").trim();
+  const chargeName = String(req.body?.chargeName || "").trim();
+  const amountRaw = req.body?.amount;
+  const amount =
+    amountRaw === undefined || amountRaw === null || amountRaw === ""
+      ? undefined
+      : Math.abs(Number(amountRaw));
 
+  if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
+  if (!userId) return res.status(401).json({ error: "invalid user from token" });
+  if (!savingsAccountId || !chargeName) {
+    return res.status(400).json({ error: "savingsAccountId and chargeName are required" });
+  }
+  if (amount !== undefined && (!Number.isFinite(amount) || amount < 0)) {
+    return res.status(400).json({ error: "amount must be a non-negative number" });
+  }
+  if (amount === 0) {
+    return res.status(200).json({ ok: true, skipped: true, reason: "zero_amount" });
+  }
+
+  try {
+    const owned = await findOwnedSavings(userId, savingsAccountId, tenantId);
+    if (!owned) return res.status(404).json({ error: "Savings account not found" });
+    const result = await applyAndPayChargeByName({
+      savingsAccountId,
+      chargeName,
+      amount,
+      tenant: tenantId,
+    });
+    return res.status(201).json({ ok: true, ...result });
+  } catch (err: any) {
+    logger.error("POST /account/charges/apply-and-pay failed", { message: err?.message });
+    return res.status(500).json({ error: "Charge booking failed", details: err?.message });
+  }
+});
+
+/**
+ * Attach a monthly Fineract charge (recurring). Body: { savingsAccountId, chargeName, amount? }
+ */
+route.post("/charges/attach-monthly", keycloakProtect, async (req: any, res: Response) => {
+  const tenantId = req.headers["fineract-platform-tenantid"];
+  const userId = req.userInfo?.sub;
+  const savingsAccountId = String(req.body?.savingsAccountId || req.body?.accountId || "").trim();
+  const chargeName = String(req.body?.chargeName || "").trim();
+  const amountRaw = req.body?.amount;
+  const amount =
+    amountRaw === undefined || amountRaw === null || amountRaw === ""
+      ? undefined
+      : Math.abs(Number(amountRaw));
+
+  if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
+  if (!userId) return res.status(401).json({ error: "invalid user from token" });
+  if (!savingsAccountId || !chargeName) {
+    return res.status(400).json({ error: "savingsAccountId and chargeName are required" });
+  }
+
+  try {
+    const owned = await findOwnedSavings(userId, savingsAccountId, tenantId);
+    if (!owned) return res.status(404).json({ error: "Savings account not found" });
+    const result = await attachMonthlyChargeByName({
+      savingsAccountId,
+      chargeName,
+      amount,
+      tenant: tenantId,
+    });
+    return res.status(201).json({ ok: true, ...result });
+  } catch (err: any) {
+    logger.error("POST /account/charges/attach-monthly failed", { message: err?.message });
+    return res.status(500).json({ error: "Monthly charge attach failed", details: err?.message });
+  }
+});
 
 
