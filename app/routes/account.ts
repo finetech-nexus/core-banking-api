@@ -456,6 +456,10 @@ route.post("/charges/apply-and-pay", keycloakProtect, async (req: any, res: Resp
     amountRaw === undefined || amountRaw === null || amountRaw === ""
       ? undefined
       : Math.abs(Number(amountRaw));
+  const cardId = String(req.body?.cardId || "").trim();
+  const last4 = String(req.body?.last4 || "").replace(/\D/g, "").slice(-4);
+  const scheme = String(req.body?.scheme || "").trim();
+  const merchant = String(req.body?.merchant || chargeName || "Fee").trim();
 
   if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
   if (!userId) return res.status(401).json({ error: "invalid user from token" });
@@ -472,10 +476,16 @@ route.post("/charges/apply-and-pay", keycloakProtect, async (req: any, res: Resp
   try {
     const owned = await findOwnedSavings(userId, savingsAccountId, tenantId);
     if (!owned) return res.status(404).json({ error: "Savings account not found" });
+    const note = cardId
+      ? cardLedgerNote({ cardId, last4, scheme, merchant })
+      : req.body?.note
+        ? String(req.body.note)
+        : undefined;
     const result = await applyAndPayChargeByName({
       savingsAccountId,
       chargeName,
       amount,
+      note,
       tenant: tenantId,
     });
     return res.status(201).json({ ok: true, ...result });
@@ -498,6 +508,10 @@ route.post("/charges/attach-monthly", keycloakProtect, async (req: any, res: Res
     amountRaw === undefined || amountRaw === null || amountRaw === ""
       ? undefined
       : Math.abs(Number(amountRaw));
+  const cardId = String(req.body?.cardId || "").trim();
+  const last4 = String(req.body?.last4 || "").replace(/\D/g, "").slice(-4);
+  const scheme = String(req.body?.scheme || "").trim();
+  const merchant = String(req.body?.merchant || chargeName || "Monthly fee").trim();
 
   if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
   if (!userId) return res.status(401).json({ error: "invalid user from token" });
@@ -508,10 +522,16 @@ route.post("/charges/attach-monthly", keycloakProtect, async (req: any, res: Res
   try {
     const owned = await findOwnedSavings(userId, savingsAccountId, tenantId);
     if (!owned) return res.status(404).json({ error: "Savings account not found" });
+    const note = cardId
+      ? cardLedgerNote({ cardId, last4, scheme, merchant })
+      : req.body?.note
+        ? String(req.body.note)
+        : undefined;
     const result = await attachMonthlyChargeByName({
       savingsAccountId,
       chargeName,
       amount,
+      note,
       tenant: tenantId,
     });
     return res.status(201).json({ ok: true, ...result });

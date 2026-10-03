@@ -118,16 +118,22 @@ export async function paySavingsCharge(opts: {
   savingsAccountId: string;
   savingsAccountChargeId: number | string;
   amount?: number;
+  /** Optional Fineract note (e.g. card JSON so fees appear in card history). */
+  note?: string;
   tenant?: string;
 }) {
   const auth = await adminAuth();
+  // Fineract payCharge expects `dueDate` (dueAsOfDate), not transactionDate.
   const payload: Record<string, unknown> = {
-    transactionDate: today(),
+    dueDate: today(),
     dateFormat: "yyyy-MM-dd",
     locale: "en",
   };
   if (opts.amount != null && Number.isFinite(opts.amount) && opts.amount > 0) {
     payload.amount = opts.amount;
+  }
+  if (opts.note) {
+    payload.note = opts.note;
   }
   logger.info("Pay savings charge", {
     savingsAccountId: opts.savingsAccountId,
@@ -156,6 +162,7 @@ export async function applyAndPayChargeByName(opts: {
   savingsAccountId: string;
   chargeName: string;
   amount?: number;
+  note?: string;
   tenant?: string;
 }) {
   const charge = await findChargeByName(opts.chargeName, opts.tenant);
@@ -179,6 +186,7 @@ export async function applyAndPayChargeByName(opts: {
     savingsAccountId: opts.savingsAccountId,
     savingsAccountChargeId,
     amount: opts.amount,
+    note: opts.note,
     tenant: opts.tenant,
   });
   return {
@@ -199,6 +207,7 @@ export async function attachMonthlyChargeByName(opts: {
   savingsAccountId: string;
   chargeName: string;
   amount?: number;
+  note?: string;
   /** When false, only attaches the schedule (no immediate debit). Default true. */
   collectFirstPeriod?: boolean;
   tenant?: string;
@@ -229,6 +238,7 @@ export async function attachMonthlyChargeByName(opts: {
       savingsAccountId: opts.savingsAccountId,
       savingsAccountChargeId,
       amount,
+      note: opts.note,
       tenant: opts.tenant,
     });
   }
