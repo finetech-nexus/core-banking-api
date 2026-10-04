@@ -457,7 +457,7 @@ route.get("/charges/catalog", async (req: any, res: Response) => {
       .filter((c) => c && c.active !== false && c.name)
       .map((c) => {
         const timeId = Number((c as any).chargeTimeType?.id ?? (c as any).chargeTimeType ?? 0);
-        const chargeKind = timeId === 7 ? "RECURRENT" : timeId === 2 ? "ONE_SHOT" : "OTHER";
+        const chargeKind = timeId === 7 ? "RECURRENT" : timeId === 2 ? "INSTALLMENT" : "OTHER";
         const code = String((c as any).currency?.code || (c as any).currencyCode || "").toUpperCase();
         return {
           id: c.id,
@@ -473,8 +473,8 @@ route.get("/charges/catalog", async (req: any, res: Response) => {
         (c) =>
           !kind ||
           c.kind === kind ||
-          (kind === "FEE" && c.kind === "ONE_SHOT") ||
-          (kind === "BANK" && (c.kind === "ONE_SHOT" || c.kind === "RECURRENT"))
+          ((kind === "FEE" || kind === "ONE_SHOT") && c.kind === "INSTALLMENT") ||
+          (kind === "BANK" && (c.kind === "INSTALLMENT" || c.kind === "RECURRENT"))
       )
       .sort((a, b) => String(a.name).localeCompare(String(b.name)));
     return res.json({ tenant: tenantId, charges: mapped });
