@@ -19,7 +19,8 @@ function internalHeaders() {
 export type ReferralRow = {
   id: string;
   ownerId?: string | null;
-  invitedEmail: string;
+  referralCode?: string | null;
+  invitedEmail?: string | null;
   status: string;
   rewardAmount: number | null;
   currency: string;
@@ -30,7 +31,11 @@ export type ReferralRow = {
   workflowRuntimeId?: string | null;
 };
 
-export async function matchReferral(email: string, referredUserId: string): Promise<ReferralRow | null> {
+export async function matchReferral(input: {
+  referralCode?: string;
+  email?: string;
+  referredUserId: string;
+}): Promise<ReferralRow | null> {
   const base = subscriptionBase();
   if (!base) {
     logger.warn("Referral match skipped: SUBSCRIPTION_API_URL not set");
@@ -39,7 +44,11 @@ export async function matchReferral(email: string, referredUserId: string): Prom
   try {
     const response = await axios.post(
       `${base}/referrals/internal/match`,
-      { email, referredUserId },
+      {
+        referralCode: input.referralCode || undefined,
+        email: input.email || undefined,
+        referredUserId: input.referredUserId,
+      },
       { headers: internalHeaders(), timeout: 10000, validateStatus: () => true }
     );
     if (response.status === 404) return null;

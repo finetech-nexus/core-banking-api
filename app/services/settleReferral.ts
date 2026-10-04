@@ -70,7 +70,7 @@ export async function creditReferrerReward(referral: ReferralRow) {
       PAYMENT_TYPE_ID,
       `parrainage-${referral.id}`,
       amount,
-      `Parrainage reward ${amount} ${referral.currency} — ${referral.invitedEmail}`,
+      `Parrainage reward ${amount} ${referral.currency} — ${referral.referralCode || referral.invitedEmail || referral.id}`,
       tenantId
     );
     logger.info("Parrainage reward credited", {

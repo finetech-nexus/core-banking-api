@@ -299,18 +299,27 @@ route.post("/onboarding",keycloakProtect, async (req: any, res: Response) => {
 
     logger.info("Onboarding result", { clientId: result?.clientId });
 
-    // Parrainage: if this email was invited, start Ballerine validation then credit referrer on approve.
+    // Parrainage: match shared referral code (or legacy invited email), then Ballerine validation.
     let parrainage: Record<string, unknown> | null = null;
     const invitedEmail = String(params.email || "").trim();
     const referredUserId = String(params.externalId || "").trim();
-    if (invitedEmail && referredUserId) {
+    const referralCode = String(
+      entity.referralCode || payload.data?.entity?.data?.referralCode || ""
+    )
+      .trim()
+      .toUpperCase();
+    if (referredUserId && (referralCode || invitedEmail)) {
       try {
-        const matched = await matchReferral(invitedEmail, referredUserId);
+        const matched = await matchReferral({
+          referralCode: referralCode || undefined,
+          email: invitedEmail || undefined,
+          referredUserId,
+        });
         if (matched?.id) {
           const workflow = await startParrainageWorkflow({
             referrerUserId: String(matched.ownerId || ""),
             referredUserId,
-            invitedEmail,
+            invitedEmail: invitedEmail || String(matched.invitedEmail || ""),
             referralId: matched.id,
             rewardAmount: Number(matched.rewardAmount || 0),
             currency: String(matched.currency || "EUR"),
@@ -320,9 +329,19 @@ route.post("/onboarding",keycloakProtect, async (req: any, res: Response) => {
           });
           if (workflow?.workflowRuntimeId) {
             await attachReferralWorkflow(matched.id, workflow.workflowRuntimeId);
-            parrainage = { referralId: matched.id, workflowRuntimeId: workflow.workflowRuntimeId, status: "IN_REVIEW" };
+            parrainage = {
+              referralId: matched.id,
+              referralCode: matched.referralCode,
+              workflowRuntimeId: workflow.workflowRuntimeId,
+              status: "IN_REVIEW",
+            };
           } else {
-            parrainage = { referralId: matched.id, status: "IN_REVIEW", workflow: "skipped" };
+            parrainage = {
+              referralId: matched.id,
+              referralCode: matched.referralCode,
+              status: "IN_REVIEW",
+              workflow: "skipped",
+            };
           }
         }
       } catch (err: any) {
