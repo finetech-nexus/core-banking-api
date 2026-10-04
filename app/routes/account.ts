@@ -534,7 +534,9 @@ route.post("/charges/apply-and-pay", keycloakProtect, async (req: any, res: Resp
       ? cardLedgerNote({ cardId, last4, scheme, merchant })
       : req.body?.note
         ? String(req.body.note)
-        : undefined;
+        : merchant
+          ? JSON.stringify({ type: "fee", payee: merchant, merchant, note: merchant })
+          : undefined;
     const result = await applyAndPayChargeByName({
       savingsAccountId,
       chargeName,
@@ -589,7 +591,9 @@ route.post("/charges/attach-monthly", keycloakProtect, async (req: any, res: Res
       ? cardLedgerNote({ cardId, last4, scheme, merchant })
       : req.body?.note
         ? String(req.body.note)
-        : undefined;
+        : merchant
+          ? JSON.stringify({ type: "fee", payee: merchant, merchant, note: merchant })
+          : undefined;
     const result = await attachMonthlyChargeByName({
       savingsAccountId,
       chargeName,
