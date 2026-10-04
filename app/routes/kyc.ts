@@ -7,6 +7,9 @@ import axios from "axios";
 import { logger } from "../logger";
 import { isExchangeCurrencyWebhook } from "../services/ballerineExchange";
 import { settleExchangeFromWebhook } from "../services/settleExchange";
+import { isParrainageWebhook, startParrainageWorkflow } from "../services/ballerineReferral";
+import { settleReferralFromWebhook } from "../services/settleReferral";
+import { attachReferralWorkflow, matchReferral } from "../services/referralClient";
 
 export const route = Router();
 
@@ -200,6 +203,10 @@ route.post("/onboarding",keycloakProtect, async (req: any, res: Response) => {
       const result = await settleExchangeFromWebhook(payload);
       return res.status(200).json({ message: "Exchange review processed", ...result });
     }
+    if (isParrainageWebhook(payload)) {
+      const result = await settleReferralFromWebhook(payload);
+      return res.status(200).json({ message: "Parrainage review processed", ...result });
+    }
     //console.log(JSON.stringify(payload))
     const documents = payload.data.documents || [];
     const entity = payload.data?.entity?.data || {};
@@ -292,12 +299,44 @@ route.post("/onboarding",keycloakProtect, async (req: any, res: Response) => {
 
     logger.info("Onboarding result", { clientId: result?.clientId });
 
+    // Parrainage: if this email was invited, start Ballerine validation then credit referrer on approve.
+    let parrainage: Record<string, unknown> | null = null;
+    const invitedEmail = String(params.email || "").trim();
+    const referredUserId = String(params.externalId || "").trim();
+    if (invitedEmail && referredUserId) {
+      try {
+        const matched = await matchReferral(invitedEmail, referredUserId);
+        if (matched?.id) {
+          const workflow = await startParrainageWorkflow({
+            referrerUserId: String(matched.ownerId || ""),
+            referredUserId,
+            invitedEmail,
+            referralId: matched.id,
+            rewardAmount: Number(matched.rewardAmount || 0),
+            currency: String(matched.currency || "EUR"),
+            accountId: matched.accountId,
+            firstName: firstName || undefined,
+            lastName: lastName || undefined,
+          });
+          if (workflow?.workflowRuntimeId) {
+            await attachReferralWorkflow(matched.id, workflow.workflowRuntimeId);
+            parrainage = { referralId: matched.id, workflowRuntimeId: workflow.workflowRuntimeId, status: "IN_REVIEW" };
+          } else {
+            parrainage = { referralId: matched.id, status: "IN_REVIEW", workflow: "skipped" };
+          }
+        }
+      } catch (err: any) {
+        logger.warn("Parrainage match after onboarding failed", { error: err?.message });
+      }
+    }
+
     // 3. Return response
     return res.status(200).json({
       message: 'User onboarded successfully',
       clientId: result.clientId,
       accountId: result.accountId,
-      virtualIBAN: result.virtualIBAN
+      virtualIBAN: result.virtualIBAN,
+      parrainage,
     });
 
    } catch (error: any) {
