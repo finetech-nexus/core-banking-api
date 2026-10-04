@@ -1,102 +1,48 @@
-import { Router, Request, Response } from "express";
+import { Router, Response } from "express";
 import { keycloakProtect } from "../middlewares/keycloakProtect";
-import { makeRequest } from "../middlewares/fineractRequest";
-import { getClients } from "../services/fineractClient";
-import { getFineractAccessToken } from "../services/keycloak-admin";
 import { logger } from "../logger";
+import {
+  BENEFICIARIES_DATATABLE,
+  deleteDatatableRow,
+  insertDatatableRow,
+  listDatatableRowsForUser,
+  resolveDefaultAccountId,
+  resolveOwnedAccountId,
+  rowId,
+} from "../services/clientDatatable";
 
 export const route = Router();
 
 /**
  * @swagger
- * components:
- *   schemas:
- *     Beneficiary:
- *       type: object
- *       required:
- *         - name
- *         - accountNo
- *         - bankCode
- *       properties:
- *         name:
- *           type: string
- *           description: Beneficiary full name
- *         accountNo:
- *           type: string
- *           description: Beneficiary bank account number
- *         bankCode:
- *           type: string
- *           description: Beneficiary bank code
- *
- *     BeneficiaryResponse:
- *       type: object
- *       properties:
- *         id:
- *           type: string
- *         name:
- *           type: string
- *         accountNo:
- *           type: string
- *         bankCode:
- *           type: string
- *         status:
- *           type: string
- *           description: Status of the beneficiary
- */
-
-/**
- * @swagger
  * /beneficiaries:
  *   post:
- *     summary: Add a new beneficiary
+ *     summary: Add a beneficiary on a savings account (datatable beneficiaries_savings)
  *     tags:
  *       - Beneficiaries
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       description: Beneficiary info to add
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/Beneficiary'
- *     responses:
- *       200:
- *         description: Beneficiary added successfully
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/BeneficiaryResponse'
- *       401:
- *         description: Unauthorized - invalid or missing token
- *       500:
- *         description: Failed to add beneficiary
  */
 route.post("/", keycloakProtect, async (req: any, res: Response) => {
   const userId = req.userInfo.sub;
   const tenantId = req.headers["fineract-platform-tenantid"];
-  const auth = req.headers["authorization"];
-  logger.debug("POST /client_beneficiaries", { userId, tenantId });
-  console.log(JSON.stringify(req.body))
-  if (!tenantId || !auth) {
+  logger.debug("POST /beneficiary → beneficiaries_savings", { userId, tenantId });
+  if (!tenantId) {
     return res.status(400).json({ error: "Missing Fineract headers" });
   }
   try {
-    const clients = await getClients(userId, tenantId);
-    if (!Array.isArray(clients) || clients.length !== 1) {
-      return res.status(404).json({ error: "Client not found" });
+    const accountId = await resolveDefaultAccountId(
+      userId,
+      tenantId,
+      req.body?.accountId ?? req.body?.savingsAccountId ?? req.query.accountId
+    );
+    if (accountId == null) {
+      return res.status(400).json({ error: "accountId is required and must belong to the user" });
     }
-    const clientId = clients[0].id;
-    const token = await getFineractAccessToken(); 
-    let authToken = 'Bearer ' + token;
-    const response = await makeRequest({
-      method: "POST",
-      endpoint: `/datatables/beneficiaries_client/${clientId}`,
-      data: req.body,
-      auth: authToken,
-      tenant: tenantId,
-    });
-    
+    const { accountId: _a, savingsAccountId: _s, ...data } = req.body || {};
+    const response = await insertDatatableRow(BENEFICIARIES_DATATABLE, accountId, tenantId, data);
+    if ((response as any)?.error) {
+      logger.error("Beneficiary insert failed", { message: (response as any).message });
+      return res.status(502).json({ error: "Failed to add beneficiary", details: (response as any).message });
+    }
     return res.json(response);
   } catch (err) {
     logger.error("Error adding beneficiary", { error: err });
@@ -104,82 +50,62 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
   }
 });
 
-
 /**
  * @swagger
  * /beneficiaries:
  *   get:
- *     summary: List all beneficiaries for the user
- *     tags:
- *       - Beneficiaries
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: List of beneficiaries
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/components/schemas/BeneficiaryResponse'
- *       401:
- *         description: Unauthorized - invalid or missing token
- *       500:
- *         description: Could not fetch beneficiaries
+ *     summary: List beneficiaries for owned savings accounts
  */
 route.get("/", keycloakProtect, async (req: any, res: Response) => {
   const userId = req.userInfo.sub;
   const tenantId = req.headers["fineract-platform-tenantid"];
-  logger.debug("GET /client_beneficiaries", { userId, tenantId });
+  logger.debug("GET /beneficiary → beneficiaries_savings", { userId, tenantId });
   if (!tenantId) {
     return res.status(400).json({ error: "Missing Fineract headers" });
   }
   try {
-    const clients = await getClients(userId, tenantId);
-    if (!Array.isArray(clients) || clients.length !== 1) {
-      return res.status(404).json({ error: "Client not found" });
-    }
-    const clientId = clients[0].id;
-    const token = await getFineractAccessToken(); 
-    let authToken = 'Bearer ' + token;
-    
-    const response = await makeRequest({
-      method: "GET",
-      endpoint: `/datatables/beneficiaries_client/${clientId}`,
-      data: req.body,
-      auth: authToken,
-      tenant: tenantId,
+    const accountId = req.query.accountId ?? req.query.savingsAccountId;
+    const rows = await listDatatableRowsForUser(BENEFICIARIES_DATATABLE, userId, tenantId, accountId);
+    // Keep mobile-compatible array of named rows (plus accountId for multi-account).
+    const data = rows.map((r) => {
+      const { _accountId, ...rest } = r;
+      return { ...rest, accountId: String(_accountId) };
     });
-    return res.json(response);
+    return res.json(data);
   } catch (err) {
-    logger.error("Error delete beneficiary", { error: err });
-    return res.status(500).json({ error: "Failed to delete beneficiary" });
+    logger.error("Error listing beneficiaries", { error: err });
+    return res.status(500).json({ error: "Failed to list beneficiaries" });
   }
 });
 
 route.delete("/:id", keycloakProtect, async (req: any, res: Response) => {
   const userId = req.userInfo.sub;
   const tenantId = req.headers["fineract-platform-tenantid"];
-  const id = req.params.id
-  logger.debug("GET /client_beneficiaries", { userId, tenantId });
+  const id = req.params.id;
+  logger.debug("DELETE /beneficiary → beneficiaries_savings", { userId, tenantId, id });
   if (!tenantId) {
     return res.status(400).json({ error: "Missing Fineract headers" });
   }
   try {
-    const clients = await getClients(userId, tenantId);
-    if (!Array.isArray(clients) || clients.length !== 1) {
-      return res.status(404).json({ error: "Client not found" });
+    const hinted = req.query.accountId ?? req.body?.accountId;
+    if (hinted != null) {
+      const accountId = await resolveOwnedAccountId(userId, tenantId, hinted);
+      if (accountId == null) return res.status(404).json({ error: "Account not found" });
+      const response = await deleteDatatableRow(BENEFICIARIES_DATATABLE, accountId, id, tenantId);
+      if ((response as any)?.error) {
+        return res.status(502).json({ error: "Failed to delete beneficiary", details: (response as any).message });
+      }
+      return res.json(response);
     }
-    const clientId = clients[0].id;
-    const token = await getFineractAccessToken(); 
-    let authToken = 'Bearer ' + token;
-    const response = await makeRequest({
-      method: "DELETE",
-      endpoint: `/datatables/beneficiaries_client/${clientId}/${id}`,
-      auth: authToken,
-      tenant: tenantId,
-    });
+    const rows = await listDatatableRowsForUser(BENEFICIARIES_DATATABLE, userId, tenantId);
+    const match = rows.find((r) => String(rowId(r) ?? "") === String(id));
+    if (!match?._accountId) {
+      return res.status(404).json({ error: "Beneficiary not found" });
+    }
+    const response = await deleteDatatableRow(BENEFICIARIES_DATATABLE, match._accountId, id, tenantId);
+    if ((response as any)?.error) {
+      return res.status(502).json({ error: "Failed to delete beneficiary", details: (response as any).message });
+    }
     return res.json(response);
   } catch (err) {
     logger.error("Error delete beneficiary", { error: err });

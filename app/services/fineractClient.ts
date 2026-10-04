@@ -156,15 +156,15 @@ export async function updateClientContact(
   return response;
 }
 
-export async function createBeneficiary(clientId: string, tenantId?: string, beneficiary?: any) {
+export async function createBeneficiary(savingsAccountId: string, tenantId?: string, beneficiary?: any) {
   // 0. get Fineract token 
   const token = await getFineractAccessToken(); 
   let authToken = 'Bearer ' + token;
   
-  // 2. createBeneficiary
+  // 2. createBeneficiary on savings account datatable
   const response = await makeRequest({
     method: "POST",
-    endpoint: `/datatables/beneficiaries_client/${clientId}`,
+    endpoint: `/datatables/beneficiaries_savings/${savingsAccountId}`,
     data: beneficiary,
     auth: authToken,
     tenant: tenantId,
