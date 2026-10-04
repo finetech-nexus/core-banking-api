@@ -442,6 +442,49 @@ route.get("/charges", keycloakProtect, async (req: any, res: Response) => {
 });
 
 /**
+ * Read-only charge catalog for Product Studio selectors (no customer data).
+ * Uses Fineract admin token; optional ?tenant=&currency=&kind=ONE_SHOT|RECURRENT
+ */
+route.get("/charges/catalog", async (req: any, res: Response) => {
+  const tenantId = String(
+    req.headers["fineract-platform-tenantid"] || req.query.tenant || process.env.FINERACT_TENANT || "default"
+  ).trim();
+  const currency = String(req.query.currency || "").trim().toUpperCase();
+  const kind = String(req.query.kind || "").trim().toUpperCase();
+  try {
+    const charges = await listCharges(tenantId);
+    const mapped = (charges || [])
+      .filter((c) => c && c.active !== false && c.name)
+      .map((c) => {
+        const timeId = Number((c as any).chargeTimeType?.id ?? (c as any).chargeTimeType ?? 0);
+        const chargeKind = timeId === 7 ? "RECURRENT" : timeId === 2 ? "ONE_SHOT" : "OTHER";
+        const code = String((c as any).currency?.code || (c as any).currencyCode || "").toUpperCase();
+        return {
+          id: c.id,
+          name: c.name,
+          currencyCode: code || undefined,
+          chargeTimeType: timeId || undefined,
+          kind: chargeKind,
+          amount: c.amount,
+        };
+      })
+      .filter((c) => !currency || !c.currencyCode || c.currencyCode === currency)
+      .filter(
+        (c) =>
+          !kind ||
+          c.kind === kind ||
+          (kind === "FEE" && c.kind === "ONE_SHOT") ||
+          (kind === "BANK" && (c.kind === "ONE_SHOT" || c.kind === "RECURRENT"))
+      )
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return res.json({ tenant: tenantId, charges: mapped });
+  } catch (err: any) {
+    logger.error("GET /account/charges/catalog failed", { message: err?.message });
+    return res.status(500).json({ error: "Could not list charge catalog", details: err?.message });
+  }
+});
+
+/**
  * Book a one-shot fee on the customer's savings account (apply + pay Fineract charge).
  * Body: { savingsAccountId, chargeName, amount? }
  * Commercial amount usually comes from produit-api; chargeName is the Fineract definition.
