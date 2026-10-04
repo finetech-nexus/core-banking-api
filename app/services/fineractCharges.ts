@@ -18,6 +18,9 @@ export type FineractCharge = {
   currency?: { code?: string };
   chargeTimeType?: { id?: number; value?: string };
   chargeAppliesTo?: { id?: number; value?: string };
+  /** Months between collections for monthly/recurrent charges (1 / 3 / 12…). */
+  feeInterval?: number;
+  feeOnMonthDay?: string | { dayOfMonth?: number; monthOfYear?: number };
   active?: boolean;
 };
 

@@ -459,6 +459,15 @@ route.get("/charges/catalog", async (req: any, res: Response) => {
         const timeId = Number((c as any).chargeTimeType?.id ?? (c as any).chargeTimeType ?? 0);
         const chargeKind = timeId === 7 ? "RECURRENT" : timeId === 2 ? "INSTALLMENT" : "OTHER";
         const code = String((c as any).currency?.code || (c as any).currencyCode || "").toUpperCase();
+        const feeIntervalRaw = Number((c as any).feeInterval);
+        const feeInterval =
+          Number.isFinite(feeIntervalRaw) && feeIntervalRaw > 0
+            ? Math.floor(feeIntervalRaw)
+            : chargeKind === "RECURRENT"
+              ? 1
+              : undefined;
+        const period =
+          feeInterval === 12 ? "ANNUAL" : feeInterval === 3 ? "QUARTERLY" : feeInterval === 1 ? "MONTHLY" : undefined;
         return {
           id: c.id,
           name: c.name,
@@ -466,6 +475,8 @@ route.get("/charges/catalog", async (req: any, res: Response) => {
           chargeTimeType: timeId || undefined,
           kind: chargeKind,
           amount: c.amount,
+          feeInterval,
+          period,
         };
       })
       .filter((c) => !currency || !c.currencyCode || c.currencyCode === currency)
