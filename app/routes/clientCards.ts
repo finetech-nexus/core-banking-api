@@ -103,7 +103,7 @@ function toDatatablePayload(body: Record<string, any>, nowIso: string): Record<s
 }
 
 /**
- * GET /client-cards — durable card list from Fineract datatable cards_savings (per savings account)
+ * GET /client-cards — durable card list from Fineract datatable cards (per savings account)
  * Query: accountId (optional) — when omitted, aggregates all owned accounts.
  */
 route.get("/", keycloakProtect, async (req: any, res: Response) => {

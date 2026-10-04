@@ -164,7 +164,7 @@ export async function createBeneficiary(savingsAccountId: string, tenantId?: str
   // 2. createBeneficiary on savings account datatable
   const response = await makeRequest({
     method: "POST",
-    endpoint: `/datatables/beneficiaries_savings/${savingsAccountId}`,
+    endpoint: `/datatables/beneficiaries/${savingsAccountId}`,
     data: beneficiary,
     auth: authToken,
     tenant: tenantId,

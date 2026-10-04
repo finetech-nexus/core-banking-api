@@ -17,14 +17,14 @@ export const route = Router();
  * @swagger
  * /beneficiaries:
  *   post:
- *     summary: Add a beneficiary on a savings account (datatable beneficiaries_savings)
+ *     summary: Add a beneficiary on a savings account (datatable beneficiaries)
  *     tags:
  *       - Beneficiaries
  */
 route.post("/", keycloakProtect, async (req: any, res: Response) => {
   const userId = req.userInfo.sub;
   const tenantId = req.headers["fineract-platform-tenantid"];
-  logger.debug("POST /beneficiary → beneficiaries_savings", { userId, tenantId });
+  logger.debug("POST /beneficiary → beneficiaries", { userId, tenantId });
   if (!tenantId) {
     return res.status(400).json({ error: "Missing Fineract headers" });
   }
@@ -59,7 +59,7 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
 route.get("/", keycloakProtect, async (req: any, res: Response) => {
   const userId = req.userInfo.sub;
   const tenantId = req.headers["fineract-platform-tenantid"];
-  logger.debug("GET /beneficiary → beneficiaries_savings", { userId, tenantId });
+  logger.debug("GET /beneficiary → beneficiaries", { userId, tenantId });
   if (!tenantId) {
     return res.status(400).json({ error: "Missing Fineract headers" });
   }
@@ -82,7 +82,7 @@ route.delete("/:id", keycloakProtect, async (req: any, res: Response) => {
   const userId = req.userInfo.sub;
   const tenantId = req.headers["fineract-platform-tenantid"];
   const id = req.params.id;
-  logger.debug("DELETE /beneficiary → beneficiaries_savings", { userId, tenantId, id });
+  logger.debug("DELETE /beneficiary → beneficiaries", { userId, tenantId, id });
   if (!tenantId) {
     return res.status(400).json({ error: "Missing Fineract headers" });
   }

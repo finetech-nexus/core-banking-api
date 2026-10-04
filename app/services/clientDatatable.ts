@@ -4,10 +4,9 @@ import { getAccounts } from "./fineractAccount";
 import { getFineractAccessToken } from "./keycloak-admin";
 import { logger } from "../logger";
 
-/** Multi-row datatables attached to m_saving_account (appear as tabs on the savings account). */
-export const BENEFICIARIES_DATATABLE = "beneficiaries_savings";
-export const CARDS_DATATABLE = "cards_savings";
-export const SUBSCRIPTIONS_DATATABLE = "subscriptions_savings";
+/** Multi-row datatables attached to m_savings_account (appear as tabs on the savings account). */
+export const BENEFICIARIES_DATATABLE = "beneficiaries";
+export const CARDS_DATATABLE = "cards";
 
 async function fineractAuth(): Promise<string> {
   const token = await getFineractAccessToken();
