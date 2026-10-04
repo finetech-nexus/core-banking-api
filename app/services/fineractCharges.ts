@@ -210,6 +210,8 @@ export async function attachMonthlyChargeByName(opts: {
   note?: string;
   /** When false, only attaches the schedule (no immediate debit). Default true. */
   collectFirstPeriod?: boolean;
+  /** Months between collections: 1=monthly, 3=quarterly, 12=annual. Default 1. */
+  feeInterval?: number;
   tenant?: string;
 }) {
   const charge = await findChargeByName(opts.chargeName, opts.tenant);
@@ -217,11 +219,13 @@ export async function attachMonthlyChargeByName(opts: {
     throw new Error(`Fineract charge not found: ${opts.chargeName}`);
   }
   const amount = opts.amount ?? charge.amount;
+  const feeInterval = Math.max(1, Math.min(12, Number(opts.feeInterval) || 1));
   const applied = await applySavingsCharge({
     savingsAccountId: opts.savingsAccountId,
     chargeId: charge.id,
     amount,
     monthly: true,
+    feeInterval,
     tenant: opts.tenant,
   });
   const savingsAccountChargeId =

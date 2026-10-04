@@ -10,6 +10,7 @@ import {
 } from "../services/fineractAccount";
 import { getQuoteRate, roundMoney, toCurrencyCode } from "../services/exchangeRate";
 import { exchangeLabel, exchangeLedgerNote } from "../services/exchangeNote";
+import { resolvePaymentTypeId } from "../services/fineractPaymentTypes";
 import { isTunisiaOutboundFx, savePendingExchange } from "../services/pendingExchange";
 import { startExchangeCurrencyWorkflow } from "../services/ballerineExchange";
 import { settleExchangeFromWebhook } from "../services/settleExchange";
@@ -83,16 +84,29 @@ route.post("/debit", keycloakProtect, async (req: any, res: Response) => {
     const owned = await findOwnedSavings(userId, savingsAccountId, tenantId);
     if (!owned) return res.status(404).json({ error: "Savings account not found" });
     const receipt = `fx-out-${Date.now()}`;
+    const paymentTypeId = await resolvePaymentTypeId({
+      paymentTypeId: req.body?.paymentTypeId,
+      paymentTypeName: req.body?.paymentTypeName,
+      fallbackId: PAYMENT_TYPE_ID,
+      tenant: tenantId,
+    });
     const data = await debitAccount(
       savingsAccountId,
       owned.account.accountNo,
-      PAYMENT_TYPE_ID,
+      paymentTypeId,
       receipt,
       roundMoney(amount),
       note,
       tenantId
     );
-    return res.json({ ok: true, savingsAccountId, amount: roundMoney(amount), data });
+    return res.json({
+      ok: true,
+      savingsAccountId,
+      amount: roundMoney(amount),
+      paymentTypeId,
+      paymentTypeName: req.body?.paymentTypeName || null,
+      data,
+    });
   } catch (err: any) {
     logger.error("POST /exchange/debit failed", { message: err?.message });
     return res.status(500).json({ error: "Exchange debit failed", details: err?.message });

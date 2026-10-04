@@ -496,7 +496,8 @@ route.post("/charges/apply-and-pay", keycloakProtect, async (req: any, res: Resp
 });
 
 /**
- * Attach a monthly Fineract charge (recurring). Body: { savingsAccountId, chargeName, amount? }
+ * Attach a recurring Fineract charge. Body: { savingsAccountId, chargeName, amount?, feeInterval?, period? }
+ * period: MONTHLY|QUARTERLY|ANNUAL (maps to feeInterval 1|3|12).
  */
 route.post("/charges/attach-monthly", keycloakProtect, async (req: any, res: Response) => {
   const tenantId = req.headers["fineract-platform-tenantid"];
@@ -508,10 +509,18 @@ route.post("/charges/attach-monthly", keycloakProtect, async (req: any, res: Res
     amountRaw === undefined || amountRaw === null || amountRaw === ""
       ? undefined
       : Math.abs(Number(amountRaw));
+  const period = String(req.body?.period || req.body?.recurrentFeePeriod || "").toUpperCase();
+  const feeIntervalFromPeriod =
+    period === "ANNUAL" || period === "YEARLY" ? 12 : period === "QUARTERLY" ? 3 : period === "MONTHLY" ? 1 : 0;
+  const feeIntervalRaw = Number(req.body?.feeInterval);
+  const feeInterval =
+    Number.isFinite(feeIntervalRaw) && feeIntervalRaw > 0
+      ? Math.max(1, Math.min(12, Math.floor(feeIntervalRaw)))
+      : feeIntervalFromPeriod || 1;
   const cardId = String(req.body?.cardId || "").trim();
   const last4 = String(req.body?.last4 || "").replace(/\D/g, "").slice(-4);
   const scheme = String(req.body?.scheme || "").trim();
-  const merchant = String(req.body?.merchant || chargeName || "Monthly fee").trim();
+  const merchant = String(req.body?.merchant || chargeName || "Recurrent fee").trim();
 
   if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
   if (!userId) return res.status(401).json({ error: "invalid user from token" });
@@ -532,12 +541,13 @@ route.post("/charges/attach-monthly", keycloakProtect, async (req: any, res: Res
       chargeName,
       amount,
       note,
+      feeInterval,
       tenant: tenantId,
     });
-    return res.status(201).json({ ok: true, ...result });
+    return res.status(201).json({ ok: true, feeInterval, period: period || undefined, ...result });
   } catch (err: any) {
     logger.error("POST /account/charges/attach-monthly failed", { message: err?.message });
-    return res.status(500).json({ error: "Monthly charge attach failed", details: err?.message });
+    return res.status(500).json({ error: "Recurrent charge attach failed", details: err?.message });
   }
 });
 
