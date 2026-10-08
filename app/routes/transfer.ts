@@ -5,6 +5,18 @@ import { logger } from "../logger";
 
 export const route = Router();
 
+/** Local Tunisian bank transfers clear on SIBTEL. International transfers use SWIFT. Nexus-to-Nexus stays on Fineract. */
+function paymentScheme(req: Request): string | undefined {
+  const header = String(req.headers["x-payment-scheme"] || "").trim().toLowerCase();
+  if (header === "sibtel" || header === "swift" || header === "mt") return header;
+  const body = req.body || {};
+  const explicit = String(body.paymentScheme || body.transferType || "").trim().toLowerCase();
+  if (explicit === "sibtel" || explicit === "bank" || explicit === "local") return "sibtel";
+  if (explicit === "swift" || explicit === "international") return "swift";
+  if (explicit === "mt" || explicit === "card") return "mt";
+  return undefined;
+}
+
 /**
  * @swagger
  * components:
@@ -91,8 +103,16 @@ route.post("/request", keycloakProtect, async (req: any, res: Response) => {
     if (!tenantId) {
       return res.status(400).json({ error: "Missing Fineract headers" });
     }
+    const scheme = paymentScheme(req);
     try {
-      const response = await channelRequest({method:'POST', endpoint:'/channel/transfer', data: req.body, auth: auth, tenant: tenantId});
+      const response = await channelRequest({
+        method:'POST',
+        endpoint:'/channel/transfer',
+        data: req.body,
+        auth: auth,
+        tenant: tenantId,
+        headers: scheme ? { "X-Payment-Scheme": scheme } : {},
+      });
       if (response && typeof response === "object" && (response as { error?: boolean }).error) {
         const failed = response as { status?: number; message?: unknown };
         return res.status(failed.status || 500).json({ error: "Failed request transfer", details: failed.message });

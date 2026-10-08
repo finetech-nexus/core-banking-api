@@ -7,6 +7,7 @@ interface MakeRequestOptions {
   data?: Record<string, any> | null;
   auth?: string | null;
   tenant?: string;
+  headers?: Record<string, string>;
 }
   const DEFAULT_TENANT = process.env.FINERACT_TENANT || "default";
 // API Request Helper
@@ -15,7 +16,8 @@ export async function channelRequest<T = any>({
   endpoint,
   data = null,
   auth = null,
-  tenant = DEFAULT_TENANT
+  tenant = DEFAULT_TENANT,
+  headers: extraHeaders = {}
 }: MakeRequestOptions): Promise<T | { error: boolean; status: number; message: any }> {
   const BASE_URL = process.env.CHANNEL_BASE_URL || "https://channel.mifos.gazelle.test";
   const DEFAULT_TENANT = process.env.FINERACT_TENANT || "default";
@@ -25,6 +27,7 @@ export async function channelRequest<T = any>({
   const headers: Record<string, string> = {
     'Platform-TenantId': tenant,
     'Content-Type': 'application/json',
+    ...extraHeaders,
   };
 
   if (auth) {
