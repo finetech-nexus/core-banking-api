@@ -5,6 +5,16 @@ import { logger } from "../logger";
 
 export const route = Router();
 
+function compactId(value: unknown): string {
+  return String(value || "").replace(/\s/g, "").toUpperCase();
+}
+
+/** First two digits of a Tunisian RIB. IBAN form is TN + 2 check digits + that RIB. */
+function tunisianBankCode(value: unknown): string | undefined {
+  const compact = compactId(value);
+  return compact.startsWith("TN") && compact.length === 24 ? compact.slice(4, 6) : undefined;
+}
+
 /** Local Tunisian bank transfers clear on SIBTEL. International transfers use SWIFT. Nexus-to-Nexus stays on Fineract. */
 function paymentScheme(req: Request): string | undefined {
   const header = String(req.headers["x-payment-scheme"] || "").trim().toLowerCase();
@@ -14,6 +24,9 @@ function paymentScheme(req: Request): string | undefined {
   if (explicit === "sibtel" || explicit === "bank" || explicit === "local") return "sibtel";
   if (explicit === "swift" || explicit === "international") return "swift";
   if (explicit === "mt" || explicit === "card") return "mt";
+  const payerBank = tunisianBankCode(body.payer?.partyIdInfo?.partyIdentifier);
+  const payeeBank = tunisianBankCode(body.payee?.partyIdInfo?.partyIdentifier);
+  if (payerBank && payeeBank && payerBank !== payeeBank) return "sibtel";
   return undefined;
 }
 
@@ -104,6 +117,12 @@ route.post("/request", keycloakProtect, async (req: any, res: Response) => {
       return res.status(400).json({ error: "Missing Fineract headers" });
     }
     const scheme = paymentScheme(req);
+    if (scheme === "sibtel" && req.body?.amount && typeof req.body.amount === "object") {
+      req.body.amount.currency = "TND";
+    }
+    const headers: Record<string, string> = {};
+    if (scheme) headers["X-Payment-Scheme"] = scheme;
+    if (scheme === "sibtel") headers["X-PayeeDFSP-ID"] = "sibtel";
     try {
       const response = await channelRequest({
         method:'POST',
@@ -111,7 +130,7 @@ route.post("/request", keycloakProtect, async (req: any, res: Response) => {
         data: req.body,
         auth: auth,
         tenant: tenantId,
-        headers: scheme ? { "X-Payment-Scheme": scheme } : {},
+        headers,
       });
       if (response && typeof response === "object" && (response as { error?: boolean }).error) {
         const failed = response as { status?: number; message?: unknown };
