@@ -76,8 +76,16 @@ export function generateIBAN(accountNumber?: string): string {
       ? cleanAccount.padStart(ACCOUNT_LENGTH, "0")
       : Array.from({ length: ACCOUNT_LENGTH }, () => Math.floor(Math.random() * 10)).join("");
 
-  // Concatenate bank code + account number as string
-  const bban = bankCode + finalAccount;
+  // Bank code + account number. A Tunisian BBAN is a 20-digit RIB whose last two digits are the key.
+  let bban = bankCode + finalAccount;
+  if (countryCode === "TN") {
+    const digits = bban.replace(/\D/g, "");
+    if (digits.length >= 18) {
+      const body = digits.slice(0, 18);
+      const key = 97n - (BigInt(body + "00") % 97n);
+      bban = body + key.toString().padStart(2, "0");
+    }
+  }
 
   // Convert letters A-Z to numbers 10-35
   const lettersToNumbers = (str: string): string =>
