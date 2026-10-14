@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { keycloakProtect } from "../middlewares/keycloakProtect";
 import { channelRequest } from "../middlewares/channelRequest";
 import { logger } from "../logger";
+import { transferGlobal } from "../services/paymentPlafond";
 
 export const route = Router();
 
@@ -119,6 +120,21 @@ route.post("/request", keycloakProtect, async (req: any, res: Response) => {
     const scheme = paymentScheme(req);
     if (scheme === "sibtel" && req.body?.amount && typeof req.body.amount === "object") {
       req.body.amount.currency = "TND";
+    }
+    const transferAmount = Number(req.body?.amount?.amount);
+    const transferCurrency = String(req.body?.amount?.currency || "").trim().toUpperCase();
+    if (transferCurrency && Number.isFinite(transferAmount)) {
+      try {
+        const cap = await transferGlobal(transferCurrency);
+        if (cap != null && transferAmount > cap) {
+          return res.status(400).json({
+            error: `Transfer exceeds the ${transferCurrency} plafond of ${cap}`,
+          });
+        }
+      } catch (err) {
+        logger.error("Transfer plafond lookup failed", { error: err });
+        return res.status(503).json({ error: "Transfer plafond is unavailable" });
+      }
     }
     const headers: Record<string, string> = {};
     if (scheme) headers["X-Payment-Scheme"] = scheme;
