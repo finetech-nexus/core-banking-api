@@ -13,7 +13,7 @@ import { partyRegistration } from '../services/paymentService';
 import { assignIBAN , generateIBAN, createIBANTable} from '../services/assignIBAN';
 
 import { getClient, getClients, updateClientContact } from "../services/fineractClient";
-import { getAccounts, getTransactions, creditAccount, debitAccount, createSavingsAccountWithPolling, parseFineractDate } from "../services/fineractAccount";
+import { getAccounts, getTransactions, creditAccount, debitAccount, createSavingsAccountWithPolling, parseFineractDate, recordRejectedDebit } from "../services/fineractAccount";
 import {
   applyAndPayChargeByName,
   attachMonthlyChargeByName,
@@ -44,6 +44,16 @@ function isDebit(t: any): boolean {
   if (type.deposit === true) return false;
   const value = String(type.value || t?.entryType || "").toUpperCase();
   return value.includes("WITHDRAW") || value === "DEBIT";
+}
+
+function isRejectOffset(t: any): boolean {
+  const raw = typeof t?.note === "string" ? t.note.trim() : "";
+  if (!raw.startsWith("{")) return false;
+  try {
+    return JSON.parse(raw)?.type === "card-reject-offset";
+  } catch {
+    return false;
+  }
 }
 
 function transactionTitle(t: any): string {
@@ -102,13 +112,13 @@ route.get("/", keycloakProtect, async (req: any, res: Response) => {
             // Fetch last 5 transactions
             const transactions: any[] = await getTransactions(account.id)
              
-            const last = transactions.map((t: any) => ({
+            const last = transactions.filter((t: any) => !isRejectOffset(t)).map((t: any) => ({
               id: t.id,
               amount: t.amount,
               date: t.date,
               title: transactionTitle(t),
               transactionType: t.transactionType?.value || "Transaction",
-              entryType: t.entryType,
+              entryType: t.entryType || (isDebit(t) ? "DEBIT" : "CREDIT"),
               currency: t.currency.code,
               country: t.locale || "FR",
               reversed: t.reversed,
@@ -372,6 +382,31 @@ route.post("/card-spend", keycloakProtect, async (req: any, res: Response) => {
   }
 });
 
+/**
+ * Records a card debit that could not be taken, then marks it undone.
+ * The balance is unchanged and the line stays visible, barred, in the transaction list.
+ */
+route.post("/internal/rejected-debit", async (req: any, res: Response) => {
+  const tenantId = String(req.headers["fineract-platform-tenantid"] || process.env.FINERACT_TENANT || "tn");
+  const accountId = String(req.body?.accountId || "").trim();
+  const amount = Math.abs(Number(req.body?.amount));
+  const merchant = String(req.body?.merchant || "Card payment").trim();
+  const reference = String(req.body?.reference || req.body?.clientReference || req.body?.transactionId || "").trim();
+  const cardId = String(req.body?.cardId || "card").trim();
+  const last4 = String(req.body?.last4 || "").replace(/\D/g, "").slice(-4);
+  if (!accountId || !reference || !Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ error: "accountId, reference and amount are required" });
+  }
+  try {
+    const note = cardLedgerNote({ cardId, last4, merchant, authId: reference });
+    const data = await recordRejectedDebit(accountId, amount, note, reference, tenantId);
+    return res.status(201).json({ ok: true, ...data });
+  } catch (err: any) {
+    logger.error("POST /account/internal/rejected-debit failed", { message: err?.message });
+    return res.status(500).json({ error: "Rejected debit was not recorded", details: err?.message });
+  }
+});
+
 /** Account ledger for card history filters (`cardId` optional). */
 route.get("/transactions", keycloakProtect, async (req: any, res: Response) => {
   const tenantId = req.headers["fineract-platform-tenantid"];
@@ -388,7 +423,8 @@ route.get("/transactions", keycloakProtect, async (req: any, res: Response) => {
     if (!owned) return res.status(404).json({ error: "Savings account not found" });
     const raw = await getTransactions(accountId, tenantId);
     const transactions = (Array.isArray(raw) ? raw : [])
-      .filter((t: any) => !t?.reversed)
+      .filter((t: any) => !isRejectOffset(t))
+      .filter((t: any) => !t?.reversed || parseCardNote(typeof t?.note === "string" ? t.note : ""))
       .map((t: any) => {
         const note = typeof t?.note === "string" ? t.note : "";
         const card = parseCardNote(note);

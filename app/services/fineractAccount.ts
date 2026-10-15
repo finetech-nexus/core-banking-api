@@ -323,6 +323,91 @@ export async function releaseAmount(
   return response;
 }
 
+export async function undoSavingsTransaction(accountId: string, transactionId: string, tenant?: string) {
+  const token = await getFineractAccessToken();
+  const today = new Date().toISOString().split("T")[0];
+  const response = await makeRequest({
+    method: "POST",
+    endpoint: `/savingsaccounts/${accountId}/transactions/${transactionId}?command=undo`,
+    data: {
+      transactionDate: today,
+      dateFormat: "yyyy-MM-dd",
+      locale: "fr",
+    },
+    auth: `Bearer ${token}`,
+    tenant,
+  });
+  if ((response as any).error) {
+    logger.error("Error undoing savings transaction", { accountId, transactionId, response });
+    throw new Error("Fineract undo failed");
+  }
+  return response;
+}
+
+function receiptOf(transaction: any): string {
+  return String(transaction?.paymentDetailData?.receiptNumber || transaction?.receiptNumber || "");
+}
+
+function isWithdrawal(transaction: any): boolean {
+  const type = transaction?.transactionType || {};
+  if (type.withdrawal === true) return true;
+  return String(type.value || "").toUpperCase().includes("WITHDRAW");
+}
+
+/**
+ * Leaves a reversed withdrawal on the account so the app shows a barred line,
+ * without changing the balance. A matching deposit is posted and undone in the same step.
+ */
+export async function recordRejectedDebit(
+  accountId: string,
+  amount: number,
+  note: string,
+  reference: string,
+  tenant?: string,
+  paymentTypeId = process.env.CARD_PAYMENT_TYPE_ID || process.env.FINERACT_PAYMENT_TYPE_ID || "1"
+) {
+  if (!accountId || !Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Invalid rejected debit");
+  }
+  const receipt = reference.trim();
+  const existing = await getTransactions(accountId, tenant);
+  const already = (existing || []).find(
+    (transaction: any) => receiptOf(transaction) === receipt && transaction?.reversed === true && isWithdrawal(transaction)
+  );
+  if (already) {
+    return { transactionId: already.id, alreadyRecorded: true };
+  }
+
+  const token = await getFineractAccessToken();
+  const account = await makeRequest({
+    method: "GET",
+    endpoint: `/savingsaccounts/${accountId}`,
+    auth: `Bearer ${token}`,
+    tenant,
+  });
+  if ((account as any).error || !(account as any).accountNo) {
+    throw new Error("Savings account not found");
+  }
+  const accountNo = String((account as any).accountNo);
+  const offsetNote = JSON.stringify({ type: "card-reject-offset", reference: receipt });
+  const credit = await creditAccount(accountId, accountNo, paymentTypeId, `${receipt}-offset`, amount, offsetNote, tenant);
+  const creditId = String((credit as any).resourceId || "");
+  if (!creditId) throw new Error("Fineract credit did not return an id");
+
+  let debitId = "";
+  try {
+    const debit = await debitAccount(accountId, accountNo, paymentTypeId, receipt, amount, note, tenant);
+    debitId = String((debit as any).resourceId || "");
+    if (!debitId) throw new Error("Fineract debit did not return an id");
+    await undoSavingsTransaction(accountId, debitId, tenant);
+  } catch (err) {
+    logger.error("Rejected debit could not be reversed", { accountId, receipt, message: (err as Error)?.message });
+    throw err;
+  }
+  await undoSavingsTransaction(accountId, creditId, tenant);
+  return { transactionId: debitId, alreadyRecorded: false };
+}
+
 export function parseFineractDate(value: unknown): Date | null {
   if (value == null) return null;
   if (Array.isArray(value) && value.length >= 3) {
