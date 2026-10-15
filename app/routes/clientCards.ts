@@ -3,6 +3,7 @@ import { keycloakProtect } from "../middlewares/keycloakProtect";
 import { logger } from "../logger";
 import {
   CARDS_DATATABLE,
+  deleteDatatableRow,
   insertDatatableRow,
   listDatatableRows,
   listDatatableRowsForUser,
@@ -186,6 +187,34 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
   } catch (err) {
     logger.error("Error saving account card", { error: err });
     return res.status(500).json({ error: "Failed to save card" });
+  }
+});
+
+/**
+ * DELETE /client-cards/:cardId — remove the card row from the owner's savings account.
+ */
+route.delete("/:cardId", keycloakProtect, async (req: any, res: Response) => {
+  const userId = req.userInfo.sub;
+  const tenantId = req.headers["fineract-platform-tenantid"];
+  const cardId = String(req.params.cardId || "").trim();
+  if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
+  if (!cardId) return res.status(400).json({ error: "cardId is required" });
+  try {
+    const rows = await listDatatableRowsForUser(CARDS_DATATABLE, userId, tenantId);
+    const existing = rows.find((r) => String(r.card_id || "") === cardId);
+    const existingRowId = existing ? rowId(existing) : null;
+    const accountId = existing?._accountId ?? null;
+    if (!existing || existingRowId == null || accountId == null) {
+      return res.status(404).json({ error: "Card not found" });
+    }
+    const response = await deleteDatatableRow(CARDS_DATATABLE, accountId, existingRowId, tenantId);
+    if ((response as any)?.error) {
+      return res.status(502).json({ error: "Failed to delete card", details: (response as any).message });
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    logger.error("Error deleting account card", { error: err });
+    return res.status(500).json({ error: "Failed to delete card" });
   }
 });
 
