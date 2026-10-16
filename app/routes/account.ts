@@ -56,6 +56,32 @@ function isRejectOffset(t: any): boolean {
   }
 }
 
+function isHoldLine(t: any): boolean {
+  const type = t?.transactionType || {};
+  if (type.amountHold === true || type.amountRelease === true) return true;
+  const id = Number(type.id);
+  return id === 20 || id === 21;
+}
+
+/** Real card booking note: "MERCHANT Payment|Refund|Void". Mock card-spend notes are type "card" with a card- receipt. */
+function realCardMovement(raw: string): { merchant: string; last4?: string } | null {
+  const text = raw.trim();
+  if (!text) return null;
+  const kind = / (?:Payment|Refund|Void)$/i;
+  if (!text.startsWith("{")) {
+    return kind.test(text) ? { merchant: text } : null;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    const note = String(parsed?.note || "").trim();
+    if (!kind.test(note)) return null;
+    const payer = String(parsed?.payer || "").replace(/\D/g, "");
+    return { merchant: note, last4: payer.length >= 12 ? payer.slice(-4) : undefined };
+  } catch {
+    return null;
+  }
+}
+
 function transactionTitle(t: any): string {
   const note = typeof t?.note === "string" ? t.note.trim() : "";
   const reason = typeof t?.reasonForBlock === "string" ? t.reasonForBlock.trim() : "";
@@ -440,6 +466,7 @@ route.get("/transactions", keycloakProtect, async (req: any, res: Response) => {
   const userId = req.userInfo?.sub;
   const accountId = String(req.query.accountId || req.query.savingsAccountId || "").trim();
   const cardId = String(req.query.cardId || "").trim();
+  const last4 = String(req.query.last4 || "").replace(/\D/g, "").slice(-4);
 
   if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
   if (!userId) return res.status(401).json({ error: "invalid user from token" });
@@ -451,10 +478,13 @@ route.get("/transactions", keycloakProtect, async (req: any, res: Response) => {
     const raw = await getTransactions(accountId, tenantId);
     const transactions = (Array.isArray(raw) ? raw : [])
       .filter((t: any) => !isRejectOffset(t))
+      .filter((t: any) => !cardId || !isHoldLine(t))
       .filter((t: any) => !t?.reversed || parseCardNote(typeof t?.note === "string" ? t.note : ""))
       .map((t: any) => {
         const note = typeof t?.note === "string" ? t.note : "";
         const card = parseCardNote(note);
+        const real = card ? null : realCardMovement(note);
+        const synthetic = Boolean(card?.authId && String(card.authId).startsWith("card-"));
         const debit = isDebit(t);
         const amountAbs = Math.abs(Number(t.amount) || 0);
         const date = parseFineractDate(t.date) || parseFineractDate(t.submittedOnDate) || new Date();
@@ -463,18 +493,26 @@ route.get("/transactions", keycloakProtect, async (req: any, res: Response) => {
           amount: debit ? -amountAbs : amountAbs,
           currency: t?.currency?.code || owned.account?.currency?.code,
           date: date.toISOString(),
-          title: transactionTitle(t),
+          title: real?.merchant || transactionTitle(t),
           note,
           cardId: card?.cardId || null,
-          last4: card?.last4 || null,
-          merchant: card?.merchant || null,
+          last4: card?.last4 || real?.last4 || null,
+          merchant: real?.merchant || card?.merchant || null,
+          synthetic,
           receiptNumber: t?.paymentDetailData?.receiptNumber || card?.authId || null,
           transactionType: t?.transactionType?.value || (debit ? "Debit" : "Credit"),
           entryType: t?.entryType,
           reversed: Boolean(t?.reversed),
         };
       })
-      .filter((t: any) => !cardId || t.cardId === cardId)
+      .filter((t: any) => {
+        if (!cardId) return true;
+        if (t.synthetic) return false;
+        if (t.cardId) return t.cardId === cardId;
+        if (!t.merchant || !/ (?:Payment|Refund|Void)$/i.test(String(t.merchant))) return false;
+        if (last4 && t.last4 && t.last4 !== last4) return false;
+        return true;
+      })
       .sort((a: any, b: any) => String(b.date).localeCompare(String(a.date)));
     return res.json({ accountId, cardId: cardId || null, transactions });
   } catch (err: any) {
