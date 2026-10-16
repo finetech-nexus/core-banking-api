@@ -386,6 +386,33 @@ route.post("/card-spend", keycloakProtect, async (req: any, res: Response) => {
  * Records a card debit that could not be taken, then marks it undone.
  * The balance is unchanged and the line stays visible, barred, in the transaction list.
  */
+/** The card stores the savings id. Interop is registered on the account IBAN, kept as externalId. */
+route.get("/internal/savings/:id", async (req: any, res: Response) => {
+  const tenantId = String(req.headers["fineract-platform-tenantid"] || process.env.FINERACT_TENANT || "tn");
+  const accountId = String(req.params.id || "").trim();
+  if (!accountId) return res.status(400).json({ error: "accountId is required" });
+  try {
+    const token = await getFineractAccessToken();
+    const account = await makeRequest({
+      method: "GET",
+      endpoint: `/savingsaccounts/${encodeURIComponent(accountId)}`,
+      auth: `Bearer ${token}`,
+      tenant: tenantId,
+    });
+    if ((account as any)?.error || !(account as any)?.accountNo) {
+      return res.status(404).json({ error: "Savings account not found" });
+    }
+    return res.json({
+      id: (account as any).id,
+      accountNo: String((account as any).accountNo),
+      externalId: (account as any).externalId ? String((account as any).externalId) : "",
+    });
+  } catch (err: any) {
+    logger.error("GET /account/internal/savings failed", { message: err?.message });
+    return res.status(500).json({ error: "Savings account was not read" });
+  }
+});
+
 route.post("/internal/rejected-debit", async (req: any, res: Response) => {
   const tenantId = String(req.headers["fineract-platform-tenantid"] || process.env.FINERACT_TENANT || "tn");
   const accountId = String(req.body?.accountId || "").trim();
