@@ -21,6 +21,7 @@ import {
   listCharges,
 } from "../services/fineractCharges";
 import { cardLedgerNote, parseCardNote } from "../services/cardNote";
+import { CARDS_DATATABLE, listDatatableRows } from "../services/clientDatatable";
 import { logger } from "../logger";
 
 export const route = Router();
@@ -63,23 +64,81 @@ function isHoldLine(t: any): boolean {
   return id === 20 || id === 21;
 }
 
-/** Real card booking note: "MERCHANT Payment|Refund|Void". Mock card-spend notes are type "card" with a card- receipt. */
+/** Real card booking. The payer on these lines is the account IBAN, so the card is matched separately. */
 function realCardMovement(raw: string): { merchant: string; last4?: string } | null {
   const text = raw.trim();
   if (!text) return null;
-  const kind = / (?:Payment|Refund|Void)$/i;
+  const kind = /payment|refund|void/i;
   if (!text.startsWith("{")) {
-    return kind.test(text) ? { merchant: text } : null;
+    if (!kind.test(text) || /sent from nexus/i.test(text)) return null;
+    return { merchant: text };
   }
   try {
     const parsed = JSON.parse(text);
+    if (String(parsed?.type || "").toLowerCase() === "card") return null;
     const note = String(parsed?.note || "").trim();
-    if (!kind.test(note)) return null;
-    const payer = String(parsed?.payer || "").replace(/\D/g, "");
-    return { merchant: note, last4: payer.length >= 12 ? payer.slice(-4) : undefined };
+    const payee = String(parsed?.payee || "").trim();
+    const blob = `${note} ${payee}`;
+    if (!kind.test(blob) || /sent from nexus/i.test(blob)) return null;
+    const payer = String(parsed?.payer || "").replace(/\s/g, "");
+    const generic = /card payment|card refund|monétique|monetique/i.test(note);
+    return {
+      merchant: generic ? payee || note : note || payee,
+      last4: /^\d{13,19}$/.test(payer) ? payer.slice(-4) : undefined,
+    };
   } catch {
     return null;
   }
+}
+
+type CardUse = { amount: number; operation: string; merchant: string; used: boolean };
+
+async function cardLast4(accountId: string, cardId: string, tenantId: string): Promise<string> {
+  const rows = await listDatatableRows(CARDS_DATATABLE, Number(accountId), tenantId);
+  const found = rows.find((row) => String(row.card_id || row.cardId || "") === cardId);
+  return String(found?.last4 || "").replace(/\D/g, "").slice(-4);
+}
+
+/** Card operations recorded for this PAN tail. The clear PAN is not kept. */
+async function cardUses(last4: string): Promise<CardUse[]> {
+  if (!last4) return [];
+  const base = String(process.env.MT_API_URL || "http://core-api-mt-api.api.svc.cluster.local").replace(/\/$/, "");
+  try {
+    const response = await axios.get(`${base}/api/transactions`, {
+      params: { q: last4, size: 100, page: 0 },
+      timeout: 4000,
+      validateStatus: () => true,
+    });
+    const content = Array.isArray(response.data?.content) ? response.data.content : [];
+    return content
+      .filter((row: any) => String(row?.panToken || "").replace(/\D/g, "").endsWith(last4))
+      .filter((row: any) => ["AUTHORIZE", "CAPTURE", "REFUND", "VOID"].includes(String(row?.operation || "").toUpperCase()))
+      .map((row: any) => ({
+        amount: Math.abs(Number(row.amount) || 0),
+        operation: String(row.operation || "").toUpperCase(),
+        merchant: String(row.merchantId || "").trim(),
+        used: false,
+      }));
+  } catch (err: any) {
+    logger.warn("Card operation lookup failed", { message: err?.message });
+    return [];
+  }
+}
+
+function claimUse(amount: number, credit: boolean, merchant: string, uses: CardUse[]): boolean {
+  const text = merchant.toLowerCase();
+  const hit = uses.find((use) => {
+    if (use.used || Math.abs(use.amount - Math.abs(amount)) > 0.02) return false;
+    const refund = use.operation === "REFUND";
+    if (refund !== credit && use.operation !== "VOID") return false;
+    if (use.merchant && text && !text.includes(use.merchant.toLowerCase())) {
+      if (!/card payment|card refund|monétique|monetique/.test(text)) return false;
+    }
+    return true;
+  });
+  if (!hit) return false;
+  hit.used = true;
+  return true;
 }
 
 function transactionTitle(t: any): string {
@@ -476,6 +535,8 @@ route.get("/transactions", keycloakProtect, async (req: any, res: Response) => {
     const owned = await findOwnedSavings(userId, accountId, tenantId);
     if (!owned) return res.status(404).json({ error: "Savings account not found" });
     const raw = await getTransactions(accountId, tenantId);
+    const tail = cardId ? (await cardLast4(accountId, cardId, tenantId)) || last4 : "";
+    const uses = cardId ? await cardUses(tail) : [];
     const transactions = (Array.isArray(raw) ? raw : [])
       .filter((t: any) => !isRejectOffset(t))
       .filter((t: any) => !cardId || !isHoldLine(t))
@@ -509,9 +570,9 @@ route.get("/transactions", keycloakProtect, async (req: any, res: Response) => {
         if (!cardId) return true;
         if (t.synthetic) return false;
         if (t.cardId) return t.cardId === cardId;
-        if (!t.merchant || !/ (?:Payment|Refund|Void)$/i.test(String(t.merchant))) return false;
-        if (last4 && t.last4 && t.last4 !== last4) return false;
-        return true;
+        if (tail && t.last4 && t.last4 === tail) return true;
+        if (!t.merchant) return false;
+        return claimUse(Number(t.amount) || 0, Number(t.amount) > 0, String(t.merchant), uses);
       })
       .sort((a: any, b: any) => String(b.date).localeCompare(String(a.date)));
     return res.json({ accountId, cardId: cardId || null, transactions });
