@@ -5,6 +5,7 @@ import { partyRegistration } from "./paymentService";
 import { generateIBAN } from "./assignIBAN";
 import { getFineractAccessToken } from "./keycloak-admin";
 import { logger } from "../logger";
+import { notifyUserCreated } from "./marbleNotify";
 
 const authToken = 'Basic ' + Buffer.from('admin:password').toString('base64');
 
@@ -55,6 +56,17 @@ export async function onboardUser(params: OnboardingParams) {
     await partyRegistration(accountNo, "MSISDN", phone);
 
     logger.info("User onboarding completed", { clientId, accountId, virtualIBAN });
+    await notifyUserCreated({
+      clientId,
+      externalId,
+      firstName,
+      lastName,
+      birthDate: dob,
+      nationality,
+      country,
+      accountId,
+      accountReference: virtualIBAN,
+    });
     return { clientId, accountId, virtualIBAN };
   } catch (err) {
     logger.error("Onboarding failed", { err });

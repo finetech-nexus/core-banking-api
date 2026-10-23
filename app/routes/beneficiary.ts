@@ -9,9 +9,76 @@ import {
   resolveDefaultAccountId,
   resolveOwnedAccountId,
   rowId,
+  updateDatatableRow,
 } from "../services/clientDatatable";
+import { checkBeneficiary } from "../services/beneficiaryCheck";
+import { fineractClientIdForUser, notifyBeneficiaryAdded } from "../services/marbleNotify";
 
 export const route = Router();
+
+const BENEFICIARY_FIELDS = [
+  "firstName",
+  "lastName",
+  "phone",
+  "email",
+  "username",
+  "iban",
+  "swift",
+  "bankName",
+  "country",
+  "type",
+  "status",
+] as const;
+
+function beneficiaryPayload(body: Record<string, unknown> | undefined) {
+  const source = body || {};
+  const data: Record<string, unknown> = {};
+  const clearable = new Set(["phone", "email", "username", "country"]);
+  for (const key of BENEFICIARY_FIELDS) {
+    if (source[key] === "" && clearable.has(key)) {
+      data[key] = "";
+      continue;
+    }
+    if (source[key] !== undefined && source[key] !== null && source[key] !== "") {
+      data[key] = source[key];
+    }
+  }
+  return data;
+}
+
+async function writeRow(
+  method: "insert" | "update",
+  accountId: number,
+  tenantId: string,
+  data: Record<string, unknown>,
+  rowIdValue?: string | number
+) {
+  const call = (payload: Record<string, unknown>) =>
+    method === "insert"
+      ? insertDatatableRow(BENEFICIARIES_DATATABLE, accountId, tenantId, payload)
+      : updateDatatableRow(BENEFICIARIES_DATATABLE, accountId, rowIdValue as string | number, tenantId, payload);
+  let response = await call(data);
+  const message = JSON.stringify((response as any)?.message || (response as any)?.error || "");
+  if ((response as any)?.error && /bankName/i.test(message)) {
+    const { bankName: _bankName, ...withoutBank } = data;
+    response = await call(withoutBank);
+  }
+  return response;
+}
+
+async function findOwnedRow(userId: string, tenantId: string, id: string, hinted: unknown) {
+  if (hinted != null && String(hinted).trim()) {
+    const accountId = await resolveOwnedAccountId(userId, tenantId, hinted as string | number);
+    if (accountId == null) return null;
+    const rows = await listDatatableRowsForUser(BENEFICIARIES_DATATABLE, userId, tenantId, accountId);
+    const match = rows.find((r) => String(rowId(r) ?? "") === String(id));
+    return match ? { accountId, row: match } : null;
+  }
+  const rows = await listDatatableRowsForUser(BENEFICIARIES_DATATABLE, userId, tenantId);
+  const match = rows.find((r) => String(rowId(r) ?? "") === String(id));
+  if (!match?._accountId) return null;
+  return { accountId: match._accountId, row: match };
+}
 
 /**
  * @swagger
@@ -37,11 +104,26 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
     if (accountId == null) {
       return res.status(400).json({ error: "accountId is required and must belong to the user" });
     }
-    const { accountId: _a, savingsAccountId: _s, ...data } = req.body || {};
-    const response = await insertDatatableRow(BENEFICIARIES_DATATABLE, accountId, tenantId, data);
+    const data = beneficiaryPayload(req.body);
+    const response = await writeRow("insert", accountId, tenantId, data);
     if ((response as any)?.error) {
       logger.error("Beneficiary insert failed", { message: (response as any).message });
       return res.status(502).json({ error: "Failed to add beneficiary", details: (response as any).message });
+    }
+    const beneficiaryId = String((response as any)?.resourceId ?? (response as any)?.id ?? data.iban ?? "");
+    if (beneficiaryId) {
+      const customerId = await fineractClientIdForUser(userId, tenantId);
+      await notifyBeneficiaryAdded({
+        beneficiaryId,
+        customerId: customerId || undefined,
+        accountId,
+        firstName: data.firstName as string | undefined,
+        lastName: data.lastName as string | undefined,
+        iban: data.iban as string | undefined,
+        swift: data.swift as string | undefined,
+        country: (data.country as string | undefined) || undefined,
+        type: data.type as string | undefined,
+      });
     }
     return res.json(response);
   } catch (err) {
@@ -75,6 +157,49 @@ route.get("/", keycloakProtect, async (req: any, res: Response) => {
   } catch (err) {
     logger.error("Error listing beneficiaries", { error: err });
     return res.status(500).json({ error: "Failed to list beneficiaries" });
+  }
+});
+
+/**
+ * @swagger
+ * /beneficiary/check:
+ *   get:
+ *     summary: Validate a beneficiary before it is saved
+ *     description: Local IBAN, international IBAN and SWIFT, or a Nexus party registered on the payment hub.
+ */
+route.get("/check", keycloakProtect, async (req: any, res: Response) => {
+  const tenantId = req.headers["fineract-platform-tenantid"];
+  if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
+  try {
+    const result = await checkBeneficiary(tenantId, req.query || {});
+    return res.json(result);
+  } catch (err) {
+    logger.error("Error checking beneficiary", { error: err });
+    return res.status(200).json({
+      ok: false,
+      party: { ok: false, reason: "unavailable" },
+    });
+  }
+});
+
+route.put("/:id", keycloakProtect, async (req: any, res: Response) => {
+  const userId = req.userInfo.sub;
+  const tenantId = req.headers["fineract-platform-tenantid"];
+  const id = req.params.id;
+  logger.debug("PUT /beneficiary → beneficiaries", { userId, tenantId, id });
+  if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
+  try {
+    const found = await findOwnedRow(userId, tenantId, id, req.body?.accountId ?? req.query.accountId);
+    if (!found) return res.status(404).json({ error: "Beneficiary not found" });
+    const data = { ...beneficiaryPayload(found.row), ...beneficiaryPayload(req.body) };
+    const response = await writeRow("update", found.accountId, tenantId, data, rowId(found.row) ?? id);
+    if ((response as any)?.error) {
+      return res.status(502).json({ error: "Failed to update beneficiary", details: (response as any).message });
+    }
+    return res.json({ ...(response as Record<string, unknown>), id, accountId: String(found.accountId) });
+  } catch (err) {
+    logger.error("Error updating beneficiary", { error: err });
+    return res.status(500).json({ error: "Failed to update beneficiary" });
   }
 });
 

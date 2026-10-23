@@ -7,6 +7,7 @@ import { logger } from "../logger";
 /** Multi-row datatables attached to m_savings_account (appear as tabs on the savings account). */
 export const BENEFICIARIES_DATATABLE = "beneficiaries";
 export const CARDS_DATATABLE = "cards";
+export const TRANSFERS_DATATABLE = "transfers";
 
 async function fineractAuth(): Promise<string> {
   const token = await getFineractAccessToken();

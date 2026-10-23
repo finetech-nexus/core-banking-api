@@ -2,7 +2,17 @@ import { Router, Request, Response } from "express";
 import { keycloakProtect } from "../middlewares/keycloakProtect";
 import { channelRequest } from "../middlewares/channelRequest";
 import { logger } from "../logger";
+import { getClients } from "../services/fineractClient";
+import { getAccounts } from "../services/fineractAccount";
+import {
+  TRANSFERS_DATATABLE,
+  insertDatatableRow,
+  listDatatableRowsForUser,
+  resolveOwnedAccountId,
+  rowId,
+} from "../services/clientDatatable";
 import { transferGlobal } from "../services/paymentPlafond";
+import { beneficiaryObjectId, fineractClientIdForUser, notifyTransaction } from "../services/marbleNotify";
 
 export const route = Router();
 
@@ -29,6 +39,110 @@ function paymentScheme(req: Request): string | undefined {
   const payeeBank = tunisianBankCode(body.payee?.partyIdInfo?.partyIdentifier);
   if (payerBank && payeeBank && payerBank !== payeeBank) return "sibtel";
   return undefined;
+}
+
+function clip(value: unknown, max: number): string {
+  return String(value ?? "").trim().slice(0, max);
+}
+
+async function accountIdForTransfer(userId: string, tenantId: string, body: any): Promise<number | null> {
+  const explicit = await resolveOwnedAccountId(userId, tenantId, body?.accountId ?? body?.savingsAccountId);
+  if (explicit != null) return explicit;
+  const iban = compactId(body?.payer?.partyIdInfo?.partyIdentifier || body?.clientRefId);
+  if (!iban) return null;
+  const clients = await getClients(userId, tenantId);
+  if (!Array.isArray(clients) || clients.length !== 1) return null;
+  const accounts = await getAccounts(String(clients[0].id), tenantId);
+  const match = (Array.isArray(accounts) ? accounts : []).find(
+    (account: any) => compactId(account?.externalId) === iban
+  );
+  const id = Number(match?.id);
+  return Number.isFinite(id) && id > 0 ? id : null;
+}
+
+function mapTransferRow(row: Record<string, unknown>, tenantId: string, accountId: number) {
+  return {
+    id: String(rowId(row) ?? ""),
+    createdAt: String(row.createdAt || ""),
+    amount: String(row.amount ?? ""),
+    currency: String(row.currency || ""),
+    motif: String(row.motif || ""),
+    status: String(row.status || "success"),
+    contactName: String(row.contactName || ""),
+    contactMeta: row.contactMeta ? String(row.contactMeta) : undefined,
+    contactId: row.contactId ? String(row.contactId) : undefined,
+    transferType: row.transferType ? String(row.transferType) : undefined,
+    tenantId,
+    accountId: String(accountId),
+  };
+}
+
+/** Best-effort: a failed history write must not fail the transfer itself. */
+async function recordTransferHistory(req: any, tenantId: string) {
+  const userId = req.userInfo?.sub;
+  if (!userId) return;
+  const body = req.body || {};
+  const accountId = await accountIdForTransfer(userId, tenantId, body);
+  if (accountId == null) {
+    logger.warn("Transfer history skipped, account not resolved", { userId, tenantId });
+    return;
+  }
+  const payee = body.payee?.partyIdInfo || {};
+  const amount = body.amount || {};
+  const payload = Object.fromEntries(
+    Object.entries({
+      contactName: clip(payee.partySubIdOrType, 120),
+      contactMeta: clip(payee.partyIdentifier, 80),
+      contactId: clip(body.contactId, 64),
+      amount: clip(amount.amount, 32),
+      currency: clip(amount.currency, 8),
+      motif: clip(body.note, 160),
+      transferType: clip(body.transferType || body.paymentScheme, 40),
+      createdAt: new Date().toISOString(),
+      status: "success",
+    }).filter(([, value]) => value !== "")
+  );
+  const saved = await insertDatatableRow(TRANSFERS_DATATABLE, accountId, tenantId, payload);
+  if ((saved as any)?.error) {
+    logger.error("Transfer history insert failed", { message: (saved as any).message });
+  }
+}
+
+function transferObjectId(response: unknown, body: any): string {
+  const source = response && typeof response === "object" ? (response as Record<string, unknown>) : {};
+  const id = source.transactionId || source.transferId || source.resourceId || source.id;
+  if (id != null && String(id).trim()) return `transfer:${String(id).trim()}`;
+  const payer = body?.payer?.partyIdInfo?.partyIdentifier || "payer";
+  const payee = body?.payee?.partyIdInfo?.partyIdentifier || "payee";
+  return `transfer:${payer}:${payee}:${body?.amount?.amount}:${Date.now()}`;
+}
+
+/** Best-effort: Marble monitoring must not fail the transfer. */
+async function notifyTransfer(req: any, tenantId: string, response: unknown) {
+  const userId = req.userInfo?.sub;
+  if (!userId) return;
+  const body = req.body || {};
+  const amount = Number(body?.amount?.amount);
+  const customerId = await fineractClientIdForUser(userId, tenantId);
+  const accountId = await accountIdForTransfer(userId, tenantId, body);
+  const contactId = body.contactId ? String(body.contactId).trim() : "";
+  const payee = body.payee?.partyIdInfo || {};
+  await notifyTransaction({
+    objectId: transferObjectId(response, body),
+    direction: "out",
+    amount,
+    currency: body?.amount?.currency,
+    country: payee.country || body.country,
+    customerId: customerId || undefined,
+    accountId: accountId ?? undefined,
+    counterpartyName: payee.partySubIdOrType,
+    counterpartyId: contactId ? beneficiaryObjectId(accountId ?? undefined, contactId) : undefined,
+    transactionType: body.transferType || body.paymentScheme || paymentScheme(req),
+    channel: paymentScheme(req) || "app",
+    paymentReference: body.note,
+    status: "booked",
+    occurredAt: new Date().toISOString(),
+  });
 }
 
 /**
@@ -108,6 +222,29 @@ route.post("/", keycloakProtect, async (req: any, res: Response) => {
     return res.status(500).json({ error: "Transfer failed" });
   }
 });*/
+route.get("/history", keycloakProtect, async (req: any, res: Response) => {
+  const tenantId = req.headers["fineract-platform-tenantid"];
+  const userId = req.userInfo?.sub;
+  if (!tenantId) return res.status(400).json({ error: "Missing Fineract headers" });
+  if (!userId) return res.status(401).json({ error: "invalid user from token" });
+  try {
+    const rows = await listDatatableRowsForUser(
+      TRANSFERS_DATATABLE,
+      userId,
+      tenantId,
+      req.query.accountId ?? req.query.savingsAccountId
+    );
+    const transfers = rows
+      .map((row) => mapTransferRow(row, tenantId, row._accountId))
+      .filter((item) => item.id)
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return res.json({ transfers });
+  } catch (err) {
+    logger.error("GET /transfer/history failed", { error: err });
+    return res.status(500).json({ error: "Failed to list transfers" });
+  }
+});
+
 route.post("/request", keycloakProtect, async (req: any, res: Response) => {
 
     const tenantId = req.headers["fineract-platform-tenantid"];
@@ -136,6 +273,7 @@ route.post("/request", keycloakProtect, async (req: any, res: Response) => {
         return res.status(503).json({ error: "Transfer plafond is unavailable" });
       }
     }
+    const { accountId: _accountId, savingsAccountId: _savingsAccountId, contactId: _contactId, ...channelBody } = req.body || {};
     const headers: Record<string, string> = {};
     if (scheme) headers["X-Payment-Scheme"] = scheme;
     if (scheme === "sibtel") headers["X-PayeeDFSP-ID"] = "sibtel";
@@ -143,7 +281,7 @@ route.post("/request", keycloakProtect, async (req: any, res: Response) => {
       const response = await channelRequest({
         method:'POST',
         endpoint:'/channel/transfer',
-        data: req.body,
+        data: channelBody,
         auth: auth,
         tenant: tenantId,
         headers,
@@ -151,6 +289,16 @@ route.post("/request", keycloakProtect, async (req: any, res: Response) => {
       if (response && typeof response === "object" && (response as { error?: boolean }).error) {
         const failed = response as { status?: number; message?: unknown };
         return res.status(failed.status || 500).json({ error: "Failed request transfer", details: failed.message });
+      }
+      try {
+        await recordTransferHistory(req, tenantId);
+      } catch (err) {
+        logger.error("Transfer history not saved", { error: err });
+      }
+      try {
+        await notifyTransfer(req, tenantId, response);
+      } catch (err) {
+        logger.error("Marble transfer notify failed", { error: err });
       }
       return res.json(response);
     } catch (err) {
