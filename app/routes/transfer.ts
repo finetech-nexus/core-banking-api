@@ -122,7 +122,8 @@ async function notifyTransfer(req: any, tenantId: string, response: unknown) {
   const userId = req.userInfo?.sub;
   if (!userId) return;
   const body = req.body || {};
-  const amount = Number(body?.amount?.amount);
+  const rawAmount = body?.amount;
+  const amount = Number(rawAmount && typeof rawAmount === "object" ? rawAmount.amount : rawAmount);
   const customerId = await fineractClientIdForUser(userId, tenantId);
   const accountId = await accountIdForTransfer(userId, tenantId, body);
   const contactId = body.contactId ? String(body.contactId).trim() : "";
